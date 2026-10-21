@@ -23,7 +23,7 @@ def sql_dir() -> Path:
     if override:
         path = Path(override)
         if not path.is_absolute():
-            path = Path.cwd() / path
+            path = PROJECT_ROOT / path
         return path
 
     for parent in Path(__file__).resolve().parents:
