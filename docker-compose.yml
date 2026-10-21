@@ -1,12 +1,12 @@
-# Backend API and the PostgreSQL database used by ml/.
-# Frontend stays a local Vite dev server: cd frontend && npm install && npm run dev
+# Backend API and the PostgreSQL database used by src/ml.
+# Frontend stays a local Vite dev server: cd src/frontend && npm install && npm run dev
 
 name: smart-credit-portal
 
 services:
   backend:
     build:
-      context: ./backend
+      context: ./src/backend
     ports:
       - "8080:8080"
     environment:
@@ -23,7 +23,7 @@ services:
       POSTGRES_DB: ${ML_POSTGRES_DB:-ml}
     volumes:
       - ml-postgres-data:/var/lib/postgresql/data
-      - ./ml/sql:/docker-entrypoint-initdb.d:ro
+      - ./src/ml/sql:/docker-entrypoint-initdb.d:ro
     healthcheck:
       test: ["CMD-SHELL", "pg_isready -U $$POSTGRES_USER -d $$POSTGRES_DB"]
       interval: 5s
