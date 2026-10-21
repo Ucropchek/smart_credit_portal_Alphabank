@@ -1,0 +1,30 @@
+# Local env and secrets
+.env
+.env.*
+!.env.example
+**/.env
+**/.env.*
+!**/.env.example
+
+# Node
+node_modules/
+dist/
+dist-ssr/
+
+# .NET
+**/bin/
+**/obj/
+
+# Python
+.venv/
+venv/
+**/__pycache__/
+*.py[cod]
+*.egg-info/
+.pytest_cache/
+
+# Editors and OS
+.idea/
+.vs/
+*.user
+.DS_Store

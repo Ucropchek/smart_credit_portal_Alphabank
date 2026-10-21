@@ -1,0 +1,18 @@
+[build-system]
+requires = ["setuptools>=69"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "smart-credit-ml"
+version = "0.1.0"
+description = "ML package. Its PostgreSQL database is separate from the product API."
+requires-python = ">=3.11"
+dependencies = [
+  "psycopg[binary]>=3.2",
+]
+
+[project.scripts]
+smart-credit-ml = "smart_credit_ml.main:main"
+
+[tool.setuptools.packages.find]
+where = ["src"]

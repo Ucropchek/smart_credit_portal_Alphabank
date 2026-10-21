@@ -1,0 +1,34 @@
+# Backend API and the PostgreSQL database used by ml/.
+# Frontend stays a local Vite dev server: cd frontend && npm install && npm run dev
+
+name: smart-credit-portal
+
+services:
+  backend:
+    build:
+      context: ./backend
+    ports:
+      - "8080:8080"
+    environment:
+      ASPNETCORE_ENVIRONMENT: Development
+      ASPNETCORE_URLS: http://+:8080
+
+  ml-postgres:
+    image: postgres:16-alpine
+    ports:
+      - "5432:5432"
+    environment:
+      POSTGRES_USER: ${ML_POSTGRES_USER:-ml}
+      POSTGRES_PASSWORD: ${ML_POSTGRES_PASSWORD:-change-me}
+      POSTGRES_DB: ${ML_POSTGRES_DB:-ml}
+    volumes:
+      - ml-postgres-data:/var/lib/postgresql/data
+      - ./ml/sql:/docker-entrypoint-initdb.d:ro
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U $$POSTGRES_USER -d $$POSTGRES_DB"]
+      interval: 5s
+      timeout: 5s
+      retries: 10
+
+volumes:
+  ml-postgres-data:
