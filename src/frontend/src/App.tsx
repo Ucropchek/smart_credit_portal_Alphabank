@@ -1,6 +1,7 @@
 import { useEffect, useRef, useState } from 'react'
 import { Header, Sidebar, type Role, type Scenario, type Screen } from './components/Shell'
 import { Dashboard } from './screens/Dashboard'
+import { Tracker } from './screens/Tracker'
 import { Wizard } from './screens/Wizard'
 
 const titles: Record<Screen, string> = {
@@ -66,6 +67,11 @@ function AppFrame({
           {screen === 'wizard' && (
             <div className="mx-auto max-w-[1280px] px-8 py-8">
               <Wizard onSubmit={() => go('tracker')} />
+            </div>
+          )}
+          {screen === 'tracker' && (
+            <div className="mx-auto max-w-[1280px] px-8 py-8">
+              <Tracker scenario={scenario} />
             </div>
           )}
         </main>
