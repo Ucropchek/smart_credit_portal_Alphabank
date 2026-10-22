@@ -1,5 +1,6 @@
 # Backend API and the shared Postgres server.
-# Database ml is the model database. Database registries is created by src/registries/init-registries.sh.
+# Database ml is created by POSTGRES_DB. src/postgres/initdb applies src/ml/sql to it.
+# Database registries is created by src/registries/init-registries.sh.
 # Frontend stays a local Vite dev server: cd src/frontend && npm install && npm run dev
 
 name: smart-credit-portal
@@ -24,8 +25,8 @@ services:
       POSTGRES_DB: ${ML_POSTGRES_DB:-ml}
     volumes:
       - postgres-data:/var/lib/postgresql/data
-      - ./src/ml/sql:/docker-entrypoint-initdb.d:ro
-      - ./src/registries/init-registries.sh:/docker-entrypoint-initdb.d/zz-init-registries.sh:ro
+      - ./src/postgres/initdb:/docker-entrypoint-initdb.d:ro
+      - ./src/ml/sql:/ml-sql:ro
       - ./src/registries:/registries:ro
     healthcheck:
       test: ["CMD-SHELL", "pg_isready -U $$POSTGRES_USER -d $$POSTGRES_DB"]
