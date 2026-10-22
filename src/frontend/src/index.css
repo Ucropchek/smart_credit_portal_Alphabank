@@ -33,3 +33,41 @@
     font-variant-numeric: tabular-nums;
   }
 }
+
+.range {
+  -webkit-appearance: none;
+  appearance: none;
+  width: 100%;
+  height: 4px;
+  border-radius: 999px;
+  background: linear-gradient(to right, var(--color-alfa) var(--pct), var(--color-line) var(--pct));
+  outline: none;
+  cursor: pointer;
+}
+
+.range::-webkit-slider-thumb {
+  -webkit-appearance: none;
+  width: 22px;
+  height: 22px;
+  border-radius: 999px;
+  background: #fff;
+  border: 2px solid var(--color-alfa);
+  box-shadow: 0 1px 3px rgb(11 31 53 / 0.15);
+  transition: transform 0.15s;
+}
+
+.range::-webkit-slider-thumb:hover {
+  transform: scale(1.1);
+}
+
+.range::-moz-range-thumb {
+  width: 18px;
+  height: 18px;
+  border-radius: 999px;
+  background: #fff;
+  border: 2px solid var(--color-alfa);
+}
+
+.range:focus-visible::-webkit-slider-thumb {
+  outline: 3px solid rgb(239 49 36 / 0.25);
+}

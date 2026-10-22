@@ -1,13 +1,17 @@
 import { useState } from 'react'
-import { Badge, Button } from './components/ui'
+import { Badge, Button, Card, CardHeader, Field, Slider, inputCls } from './components/ui'
+
+const rub = (n: number) => new Intl.NumberFormat('ru-RU').format(n) + ' ₽'
 
 export default function App() {
   const [pressed, setPressed] = useState(false)
+  const [inn, setInn] = useState('7701234567')
+  const [amount, setAmount] = useState(12_000_000)
 
   return (
     <main className="mx-auto flex max-w-3xl flex-col gap-8 px-8 py-10">
-      <section className="rounded-2xl border border-line bg-white p-6">
-        <h1 className="text-[17px] font-semibold tracking-[-0.01em]">Кнопка</h1>
+      <Card className="p-6">
+        <CardHeader title="Кнопка" />
         <div className="mt-5 flex flex-wrap items-center gap-3">
           <Button type="button" onClick={() => setPressed(true)}>
             Продолжить
@@ -37,10 +41,10 @@ export default function App() {
           </Button>
         </div>
         {pressed && <p className="mt-4 text-sm text-muted">Нажата «Продолжить»</p>}
-      </section>
+      </Card>
 
-      <section className="rounded-2xl border border-line bg-white p-6">
-        <h1 className="text-[17px] font-semibold tracking-[-0.01em]">Бейдж</h1>
+      <Card className="p-6">
+        <CardHeader title="Бейдж" />
         <div className="mt-5 flex flex-wrap items-center gap-2">
           <Badge tone="ok" dot>
             Одобрено
@@ -56,7 +60,42 @@ export default function App() {
           </Badge>
           <Badge>Архив</Badge>
         </div>
-      </section>
+      </Card>
+
+      <Card className="p-6">
+        <CardHeader
+          title="Параметры"
+          subtitle="Поле и слайдер калькулятора"
+          action={
+            <Badge tone="info" dot>
+              Черновик
+            </Badge>
+          }
+        />
+        <div className="mt-6 max-w-sm">
+          <Field label="ИНН организации" hint="10 или 12 цифр">
+            <input
+              className={inputCls}
+              inputMode="numeric"
+              value={inn}
+              onChange={(e) => setInn(e.target.value.replace(/\D/g, '').slice(0, 12))}
+            />
+          </Field>
+        </div>
+        <div className="mt-6">
+          <Slider
+            label="Сумма кредита"
+            value={amount}
+            min={1_000_000}
+            max={50_000_000}
+            step={500_000}
+            onChange={setAmount}
+            format={rub}
+            minLabel="1 млн ₽"
+            maxLabel="50 млн ₽"
+          />
+        </div>
+      </Card>
     </main>
   )
 }
