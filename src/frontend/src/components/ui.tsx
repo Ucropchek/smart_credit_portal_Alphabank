@@ -121,6 +121,15 @@ export function Field({
 export const inputCls =
   'tnum h-12 w-full rounded-xl border border-line bg-white px-4 text-[15px] text-ink outline-none transition placeholder:text-muted/60 hover:border-[#cfd4da] focus:border-ink'
 
+export function KV({ k, v, mono }: { k: string; v: ReactNode; mono?: boolean }) {
+  return (
+    <div className="min-w-0">
+      <div className="text-xs text-muted">{k}</div>
+      <div className={cx('mt-1 text-sm font-medium text-ink', mono && 'tnum')}>{v}</div>
+    </div>
+  )
+}
+
 export function Slider({
   label,
   value,

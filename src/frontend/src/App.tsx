@@ -1,6 +1,7 @@
 import { useEffect, useRef, useState } from 'react'
 import { Header, Sidebar, type Role, type Scenario, type Screen } from './components/Shell'
 import { Dashboard } from './screens/Dashboard'
+import { Wizard } from './screens/Wizard'
 
 const titles: Record<Screen, string> = {
   dashboard: 'Личный кабинет предпринимателя',
@@ -60,6 +61,11 @@ function AppFrame({
           {screen === 'dashboard' && (
             <div className="mx-auto max-w-[1280px] px-8 py-8">
               <Dashboard onApply={() => go('wizard')} onOpenApp={() => go('tracker')} />
+            </div>
+          )}
+          {screen === 'wizard' && (
+            <div className="mx-auto max-w-[1280px] px-8 py-8">
+              <Wizard onSubmit={() => go('tracker')} />
             </div>
           )}
         </main>
