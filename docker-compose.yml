@@ -1,4 +1,5 @@
-# Backend API and one Postgres server: database ml, then database registries.
+# Backend API and the shared Postgres server.
+# Database ml is the model database. Database registries is created by src/registries/init-registries.sh.
 # Frontend stays a local Vite dev server: cd src/frontend && npm install && npm run dev
 
 name: smart-credit-portal
@@ -13,7 +14,7 @@ services:
       ASPNETCORE_ENVIRONMENT: Development
       ASPNETCORE_URLS: http://+:8080
 
-  ml-postgres:
+  postgres:
     image: postgres:16-alpine
     ports:
       - "5432:5432"
@@ -22,7 +23,7 @@ services:
       POSTGRES_PASSWORD: ${ML_POSTGRES_PASSWORD:-change-me}
       POSTGRES_DB: ${ML_POSTGRES_DB:-ml}
     volumes:
-      - ml-postgres-data:/var/lib/postgresql/data
+      - postgres-data:/var/lib/postgresql/data
       - ./src/ml/sql:/docker-entrypoint-initdb.d:ro
       - ./src/registries/init-registries.sh:/docker-entrypoint-initdb.d/zz-init-registries.sh:ro
       - ./src/registries:/registries:ro
@@ -33,4 +34,4 @@ services:
       retries: 10
 
 volumes:
-  ml-postgres-data:
+  postgres-data:

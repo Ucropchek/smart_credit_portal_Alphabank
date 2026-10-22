@@ -1,4 +1,4 @@
--- Schema the ML package expects. Applied by the ml-postgres service on first start.
+-- Schema the ML package expects. Applied by the postgres service on first start.
 CREATE SCHEMA IF NOT EXISTS ml;
 
 CREATE TABLE IF NOT EXISTS ml.schema_migrations (
