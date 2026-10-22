@@ -71,3 +71,18 @@
 .range:focus-visible::-webkit-slider-thumb {
   outline: 3px solid rgb(239 49 36 / 0.25);
 }
+
+@keyframes fade-up {
+  from {
+    opacity: 0;
+    transform: translateY(6px);
+  }
+  to {
+    opacity: 1;
+    transform: none;
+  }
+}
+
+.animate-fade-up {
+  animation: fade-up 0.35s ease-out both;
+}
