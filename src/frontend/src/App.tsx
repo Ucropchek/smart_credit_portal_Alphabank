@@ -1,5 +1,6 @@
 import { useEffect, useRef, useState } from 'react'
 import { Header, Sidebar, type Role, type Scenario, type Screen } from './components/Shell'
+import { Dashboard } from './screens/Dashboard'
 
 const titles: Record<Screen, string> = {
   dashboard: 'Личный кабинет предпринимателя',
@@ -55,7 +56,13 @@ function AppFrame({
           overview={overview}
           onOverview={onOverview}
         />
-        <main ref={mainRef} className={fill ? 'flex-1 overflow-y-auto' : 'flex-1'} />
+        <main ref={mainRef} className={fill ? 'flex-1 overflow-y-auto' : 'flex-1'}>
+          {screen === 'dashboard' && (
+            <div className="mx-auto max-w-[1280px] px-8 py-8">
+              <Dashboard onApply={() => go('wizard')} onOpenApp={() => go('tracker')} />
+            </div>
+          )}
+        </main>
       </div>
     </div>
   )
