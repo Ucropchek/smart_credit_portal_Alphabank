@@ -1,6 +1,8 @@
+import { useState } from 'react'
 import { cx } from '../components/cx'
 import { Icon } from '../components/Icon'
-import { Badge, Card, KV } from '../components/ui'
+import { Badge, Button, Card, KV, Slider } from '../components/ui'
+import { annuity, months, rub } from '../format'
 
 const positive = [
   { label: 'Стабильная выручка > 24 мес', weight: '+14' },
@@ -44,6 +46,227 @@ function Gauge({ value }: { value: number }) {
   )
 }
 
+type Decision = 'approve' | 'counter' | 'rework' | 'reject'
+
+const decisions: { id: Decision; label: string }[] = [
+  { id: 'approve', label: 'Одобрить' },
+  { id: 'counter', label: 'Встречное предложение' },
+  { id: 'rework', label: 'На доработку' },
+  { id: 'reject', label: 'Отказать' },
+]
+
+const reworkPrompts = ['Выписка по счёту', 'Договоры с контрагентами', 'Отчётность за Q1']
+
+const rejectReasons = [
+  'Высокая долговая нагрузка',
+  'Недостаточная выручка',
+  'Негативная кредитная история',
+  'Стоп-факторы по политике',
+]
+
+const decisionAction: Record<Decision, string> = {
+  approve: 'Одобрить на условиях клиента',
+  counter: 'Отправить встречное предложение',
+  rework: 'Отправить запрос клиенту',
+  reject: 'Подтвердить отказ',
+}
+
+const decisionDone: Record<Decision, string> = {
+  approve: 'Заявка одобрена. Клиент получил уведомление.',
+  counter: 'Встречное предложение отправлено клиенту.',
+  rework: 'Запрос на доработку отправлен клиенту.',
+  reject: 'Отказ зафиксирован в системе.',
+}
+
+function DecisionPanel() {
+  const [decision, setDecision] = useState<Decision>('counter')
+  const [amount, setAmount] = useState(12_000_000)
+  const [term, setTerm] = useState(36)
+  const [rate, setRate] = useState(18.5)
+  const [comment, setComment] = useState(
+    'Загрузите выписку по расчётному счёту в стороннем банке за последний квартал (январь — март 2026).',
+  )
+  const [reason, setReason] = useState(rejectReasons[0])
+  const [sent, setSent] = useState<Decision | null>(null)
+  const payment = annuity(amount, rate, term)
+  const debtLoad = Math.round(((22_500_000 / 12 + payment) / (186_400_000 / 12)) * 100)
+
+  return (
+    <Card as="aside" className="sticky top-6 overflow-hidden">
+      <div className="border-b border-line px-6 pt-6 pb-4">
+        <h3 className="text-[17px] font-semibold text-ink">Решение по заявке</h3>
+        <div className="mt-4 grid grid-cols-2 gap-1 rounded-xl bg-canvas p-1">
+          {decisions.map((item) => (
+            <button
+              key={item.id}
+              type="button"
+              onClick={() => {
+                setDecision(item.id)
+                setSent(null)
+              }}
+              className={cx(
+                'h-9 cursor-pointer rounded-[10px] px-2 text-[12.5px] font-medium transition-all',
+                decision === item.id
+                  ? 'bg-white text-ink shadow-[0_1px_2px_rgb(11_31_53/0.08)] ring-1 ring-line'
+                  : 'text-muted hover:text-ink',
+                decision === item.id && item.id === 'reject' && 'text-alfa',
+              )}
+            >
+              {item.label}
+            </button>
+          ))}
+        </div>
+      </div>
+
+      <div key={decision} className="animate-fade-up px-6 py-6">
+        {decision === 'approve' && (
+          <div className="space-y-4 text-sm">
+            <p className="text-muted">Одобрение на условиях, запрошенных клиентом.</p>
+            <dl className="space-y-3 rounded-xl border border-line p-4">
+              {(
+                [
+                  ['Сумма', '15 000 000 ₽'],
+                  ['Срок', '24 месяца'],
+                  ['Ставка', '19,9%'],
+                  ['Платёж', rub(annuity(15_000_000, 19.9, 24))],
+                ] as const
+              ).map(([label, value]) => (
+                <div key={label} className="flex justify-between">
+                  <dt className="text-muted">{label}</dt>
+                  <dd className="tnum font-medium text-ink">{value}</dd>
+                </div>
+              ))}
+            </dl>
+            <div className="flex gap-2 rounded-xl bg-warn-soft p-3 text-xs text-ink">
+              <Icon name="alert" size={16} className="shrink-0 text-warn" />
+              DSCR 1,24 ниже порога политики (1,3). Потребуется согласование комитета.
+            </div>
+          </div>
+        )}
+        {decision === 'counter' && (
+          <div className="space-y-6">
+            <Slider
+              label="Одобренная сумма"
+              value={amount}
+              min={3_000_000}
+              max={15_000_000}
+              step={500_000}
+              onChange={setAmount}
+              format={rub}
+              minLabel="3 млн"
+              maxLabel="15 млн"
+            />
+            <Slider
+              label="Срок"
+              value={term}
+              min={6}
+              max={36}
+              step={1}
+              onChange={setTerm}
+              format={months}
+              minLabel="6 мес"
+              maxLabel="36 мес"
+            />
+            <Slider
+              label="Ставка"
+              value={rate}
+              min={16}
+              max={24}
+              step={0.1}
+              onChange={(value) => setRate(Math.round(value * 10) / 10)}
+              format={(value) => `${value.toLocaleString('ru-RU')}%`}
+              minLabel="16%"
+              maxLabel="24%"
+            />
+            <div className="space-y-2.5 rounded-xl bg-canvas p-4 text-sm">
+              <div className="flex justify-between">
+                <span className="text-muted">Платёж клиента</span>
+                <span className="tnum font-semibold text-ink">{rub(payment)}</span>
+              </div>
+              <div className="flex justify-between">
+                <span className="text-muted">Долговая нагрузка</span>
+                <Badge tone={debtLoad < 25 ? 'ok' : debtLoad < 35 ? 'warn' : 'danger'} className="tnum">
+                  {debtLoad}%
+                </Badge>
+              </div>
+            </div>
+          </div>
+        )}
+        {decision === 'rework' && (
+          <div className="space-y-3">
+            <label className="text-[13px] text-muted" htmlFor="rework-comment">
+              Комментарий для клиента
+            </label>
+            <textarea
+              id="rework-comment"
+              rows={6}
+              value={comment}
+              onChange={(event) => setComment(event.target.value)}
+              className="w-full resize-none rounded-xl border border-line p-3.5 text-sm text-ink outline-none focus:border-ink"
+            />
+            <div className="flex flex-wrap gap-2">
+              {reworkPrompts.map((prompt) => (
+                <button
+                  key={prompt}
+                  type="button"
+                  onClick={() => setComment((current) => `${current}\n• ${prompt}`)}
+                  className="inline-flex cursor-pointer items-center gap-1 rounded-full border border-line px-2.5 py-1 text-xs text-ink hover:bg-canvas"
+                >
+                  <Icon name="plus" size={12} />
+                  {prompt}
+                </button>
+              ))}
+            </div>
+          </div>
+        )}
+        {decision === 'reject' && (
+          <div className="space-y-2">
+            <div className="text-[13px] text-muted">Причина отказа</div>
+            {rejectReasons.map((item) => (
+              <label
+                key={item}
+                className={cx(
+                  'flex cursor-pointer items-center gap-3 rounded-xl border px-3.5 py-3 text-sm',
+                  reason === item ? 'border-ink' : 'border-line',
+                )}
+              >
+                <input
+                  type="radio"
+                  name="reject-reason"
+                  className="accent-alfa"
+                  checked={reason === item}
+                  onChange={() => setReason(item)}
+                />
+                {item}
+              </label>
+            ))}
+          </div>
+        )}
+      </div>
+
+      <div className="border-t border-line px-6 py-5">
+        {sent === decision ? (
+          <div className="animate-fade-up flex items-center gap-2.5 rounded-xl bg-ok-soft px-4 py-3 text-sm font-medium text-ink">
+            <Icon name="checkCircle" size={18} className="text-ok" />
+            {decisionDone[decision]}
+          </div>
+        ) : (
+          <Button
+            type="button"
+            size="lg"
+            className="w-full"
+            variant={decision === 'reject' ? 'dark' : 'primary'}
+            onClick={() => setSent(decision)}
+          >
+            {decisionAction[decision]}
+          </Button>
+        )}
+        <p className="mt-3 text-center text-xs text-muted">Решение будет записано в журнал аудита</p>
+      </div>
+    </Card>
+  )
+}
+
 const checks: { source: string; text: string; tone: 'ok' | 'warn' }[] = [
   { source: 'ЕГРЮЛ', text: 'Действующая', tone: 'ok' },
   { source: 'ФНС Прозрачный бизнес', text: 'Налоговых задолженностей нет', tone: 'ok' },
@@ -82,7 +305,7 @@ export function Underwriter() {
         </div>
       </div>
 
-      <div className="grid grid-cols-[320px_minmax(0,1fr)] items-start gap-6">
+      <div className="grid grid-cols-[320px_minmax(0,1fr)_340px] items-start gap-6">
         <div className="space-y-6">
         <Card className="p-6">
           <div className="flex items-center gap-3">
@@ -223,6 +446,7 @@ export function Underwriter() {
           </div>
         </Card>
         </div>
+        <DecisionPanel />
       </div>
     </div>
   )
