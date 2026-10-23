@@ -1,3 +1,6 @@
+using System.Collections.Concurrent;
+using System.Net.WebSockets;
+using System.Text.Json;
 using Npgsql;
 using NpgsqlTypes;
 
@@ -7,8 +10,11 @@ var connectionString = builder.Configuration["Postgres:ConnectionString"]
     ?? throw new InvalidOperationException("Нет строки подключения Postgres:ConnectionString");
 
 builder.Services.AddNpgsqlDataSource(connectionString);
+builder.Services.AddSingleton<BkiConsentStore>();
 
 var app = builder.Build();
+
+app.UseWebSockets(new WebSocketOptions { KeepAliveInterval = TimeSpan.FromSeconds(30) });
 
 app.MapGet("/", () => Results.Ok(new { service = "smart-credit-api" }));
 app.MapGet("/health", () => Results.Ok(new { status = "ok" }));
@@ -1483,4 +1489,126 @@ app.MapGet("/businesses/{registrationId}/score", async (string registrationId, N
     });
 });
 
+// BKI consent checkbox. The page keeps one socket open and sends {"checked": true|false} on every click.
+// The last value is kept per connection; it is never part of the application body. /score does not read it yet.
+app.Map("/bki-consent", async (HttpContext context, BkiConsentStore store, ILogger<Program> logger) =>
+{
+    if (!context.WebSockets.IsWebSocketRequest)
+    {
+        context.Response.StatusCode = StatusCodes.Status400BadRequest;
+        await context.Response.WriteAsJsonAsync(new { error = "open this path with a WebSocket client: ws://host:8080/bki-consent" });
+        return;
+    }
+
+    const int maxMessageBytes = 4096;
+
+    static bool TryReadChecked(byte[] json, out bool value)
+    {
+        value = false;
+        try
+        {
+            using var document = JsonDocument.Parse(json);
+            if (document.RootElement.ValueKind == JsonValueKind.Object
+                && document.RootElement.TryGetProperty("checked", out var property)
+                && property.ValueKind is JsonValueKind.True or JsonValueKind.False)
+            {
+                value = property.GetBoolean();
+                return true;
+            }
+        }
+        catch (JsonException)
+        {
+        }
+        return false;
+    }
+
+    using var socket = await context.WebSockets.AcceptWebSocketAsync();
+    var connectionId = store.Open();
+    var aborted = context.RequestAborted;
+
+    Task Send(object message) => socket.SendAsync(
+        JsonSerializer.SerializeToUtf8Bytes(message, JsonSerializerOptions.Web),
+        WebSocketMessageType.Text,
+        endOfMessage: true,
+        aborted);
+
+    try
+    {
+        await Send(new { connectionId, @checked = (bool?)null, changedAt = (DateTimeOffset?)null });
+
+        var buffer = new byte[1024];
+        while (socket.State == WebSocketState.Open)
+        {
+            using var message = new MemoryStream();
+            WebSocketReceiveResult result;
+            do
+            {
+                result = await socket.ReceiveAsync(buffer, aborted);
+                if (result.MessageType != WebSocketMessageType.Close)
+                    message.Write(buffer, 0, result.Count);
+            } while (!result.EndOfMessage && result.MessageType != WebSocketMessageType.Close && message.Length <= maxMessageBytes);
+
+            if (result.MessageType == WebSocketMessageType.Close)
+            {
+                await socket.CloseAsync(WebSocketCloseStatus.NormalClosure, null, CancellationToken.None);
+                break;
+            }
+
+            if (message.Length > maxMessageBytes)
+            {
+                await socket.CloseAsync(WebSocketCloseStatus.MessageTooBig, "message is larger than 4 KB", CancellationToken.None);
+                break;
+            }
+
+            if (result.MessageType != WebSocketMessageType.Text || !TryReadChecked(message.ToArray(), out var isChecked))
+            {
+                await Send(new { error = "expected {\"checked\": true} or {\"checked\": false}" });
+                continue;
+            }
+
+            var state = store.Set(connectionId, isChecked);
+            logger.LogInformation("BKI consent {ConnectionId}: checked={Checked}", connectionId, isChecked);
+            await Send(new { connectionId, @checked = state.Checked, changedAt = state.ChangedAt });
+        }
+    }
+    catch (OperationCanceledException)
+    {
+    }
+    catch (WebSocketException)
+    {
+        // The page closed without a close frame (tab closed, network lost).
+    }
+    finally
+    {
+        store.Close(connectionId);
+    }
+});
+
 app.Run();
+
+// Last BKI checkbox event of every open /bki-consent connection. Checked is null until the first click.
+sealed class BkiConsentStore
+{
+    private readonly ConcurrentDictionary<Guid, BkiConsentState> connections = new();
+
+    public Guid Open()
+    {
+        var connectionId = Guid.NewGuid();
+        connections[connectionId] = new BkiConsentState(null, null);
+        return connectionId;
+    }
+
+    public BkiConsentState Set(Guid connectionId, bool isChecked)
+    {
+        var state = new BkiConsentState(isChecked, DateTimeOffset.UtcNow);
+        connections[connectionId] = state;
+        return state;
+    }
+
+    public BkiConsentState? Get(Guid connectionId) =>
+        connections.TryGetValue(connectionId, out var state) ? state : null;
+
+    public void Close(Guid connectionId) => connections.TryRemove(connectionId, out _);
+}
+
+sealed record BkiConsentState(bool? Checked, DateTimeOffset? ChangedAt);
