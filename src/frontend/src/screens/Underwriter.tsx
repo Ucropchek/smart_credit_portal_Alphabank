@@ -2,6 +2,48 @@ import { cx } from '../components/cx'
 import { Icon } from '../components/Icon'
 import { Badge, Card, KV } from '../components/ui'
 
+const positive = [
+  { label: 'Стабильная выручка > 24 мес', weight: '+14' },
+  { label: 'Положительная кредитная история', weight: '+11' },
+  { label: 'Компания на рынке 9 лет', weight: '+6' },
+  { label: 'Диверсифицированная клиентская база', weight: '+4' },
+]
+
+const negative: { label: string; weight: string; tone: 'danger' | 'warn' }[] = [
+  { label: 'Высокая долговая нагрузка', weight: '−12', tone: 'danger' },
+  { label: 'Сезонность выручки в Q1', weight: '−5', tone: 'warn' },
+  { label: 'Арбитражные споры', weight: '−3', tone: 'warn' },
+]
+
+function Gauge({ value }: { value: number }) {
+  const radius = 96
+  const arc = Math.PI * radius
+  const segment = (from: number, to: number, color: string) => (
+    <path
+      d={`M ${120 - radius} 120 A ${radius} ${radius} 0 0 1 ${120 + radius} 120`}
+      fill="none"
+      stroke={color}
+      strokeWidth={14}
+      strokeDasharray={`${((to - from) / 100) * arc - 3} ${arc}`}
+      strokeDashoffset={-(from / 100) * arc}
+    />
+  )
+  const angle = Math.PI * (1 - value / 100)
+  const needleX = 120 + Math.cos(angle) * (radius - 26)
+  const needleY = 120 - Math.sin(angle) * (radius - 26)
+
+  return (
+    <svg viewBox="0 0 240 132" className="w-full max-w-[300px]" role="img" aria-label={`Риск ${value} из 100`}>
+      {segment(0, 40, '#0CC44D')}
+      {segment(40, 75, '#FA8C16')}
+      {segment(75, 100, '#EF3124')}
+      <line x1="120" y1="120" x2={needleX} y2={needleY} stroke="#0B1F35" strokeWidth="3" strokeLinecap="round" />
+      <circle cx="120" cy="120" r="7" fill="#0B1F35" />
+      <circle cx="120" cy="120" r="2.5" fill="#fff" />
+    </svg>
+  )
+}
+
 const checks: { source: string; text: string; tone: 'ok' | 'warn' }[] = [
   { source: 'ЕГРЮЛ', text: 'Действующая', tone: 'ok' },
   { source: 'ФНС Прозрачный бизнес', text: 'Налоговых задолженностей нет', tone: 'ok' },
@@ -40,7 +82,8 @@ export function Underwriter() {
         </div>
       </div>
 
-      <div className="w-[320px] space-y-6">
+      <div className="grid grid-cols-[320px_minmax(0,1fr)] items-start gap-6">
+        <div className="space-y-6">
         <Card className="p-6">
           <div className="flex items-center gap-3">
             <div className="grid size-11 place-items-center rounded-xl bg-ink text-sm font-semibold text-white">ВЛ</div>
@@ -87,6 +130,99 @@ export function Underwriter() {
             Обновлено автоматически 13.05.2026, 15:02
           </div>
         </Card>
+      </div>
+
+      <div className="space-y-6">
+        <Card className="p-8">
+          <div className="flex items-start justify-between">
+            <div>
+              <h3 className="text-[17px] font-semibold text-ink">Скоринг и риск-движок</h3>
+              <p className="mt-1 text-sm text-muted">Модель МСБ v4.2 · 47 факторов</p>
+            </div>
+            <Badge tone="warn" dot>
+              Средний риск
+            </Badge>
+          </div>
+          <div className="mt-4 flex flex-col items-center">
+            <Gauge value={68} />
+            <div className="-mt-1 text-center">
+              <div className="tnum text-[40px] leading-none font-semibold tracking-[-0.03em] text-ink">
+                68<span className="text-xl text-muted">/100</span>
+              </div>
+              <div className="mt-2 text-sm text-ink">
+                Уровень риска: <span className="font-semibold text-warn">Средний</span>
+              </div>
+            </div>
+            <div className="mt-4 flex w-full max-w-[300px] justify-between text-xs text-muted">
+              <span>Низкий</span>
+              <span>Средний</span>
+              <span>Высокий</span>
+            </div>
+          </div>
+          <div className="mt-8 grid grid-cols-3 gap-px overflow-hidden rounded-xl border border-line bg-line">
+            {[
+              ['PD (12 мес)', '3,8%'],
+              ['Долг / EBITDA', '3,1×'],
+              ['DSCR', '1,24'],
+            ].map(([label, value]) => (
+              <div key={label} className="bg-white px-4 py-3.5 text-center">
+                <div className="text-xs text-muted">{label}</div>
+                <div className="tnum mt-1 text-[17px] font-semibold text-ink">{value}</div>
+              </div>
+            ))}
+          </div>
+        </Card>
+
+        <Card className="p-8">
+          <div className="text-sm font-semibold text-ink">Положительные факторы</div>
+          <div className="mt-3 flex flex-wrap gap-2">
+            {positive.map((factor) => (
+              <span
+                key={factor.label}
+                className="inline-flex items-center gap-2 rounded-full bg-ok-soft py-1.5 pr-1.5 pl-3 text-[13px] font-medium text-ink"
+              >
+                <Icon name="trendUp" size={14} className="text-ok" />
+                {factor.label}
+                <span className="tnum rounded-full bg-white px-2 py-0.5 text-xs font-semibold text-ok">{factor.weight}</span>
+              </span>
+            ))}
+          </div>
+          <div className="mt-6 text-sm font-semibold text-ink">Факторы риска</div>
+          <div className="mt-3 flex flex-wrap gap-2">
+            {negative.map((factor) => (
+              <span
+                key={factor.label}
+                className={cx(
+                  'inline-flex items-center gap-2 rounded-full py-1.5 pr-1.5 pl-3 text-[13px] font-medium text-ink',
+                  factor.tone === 'danger' ? 'bg-danger-soft' : 'bg-warn-soft',
+                )}
+              >
+                <Icon
+                  name="trendDown"
+                  size={14}
+                  className={factor.tone === 'danger' ? 'text-alfa' : 'text-warn'}
+                />
+                {factor.label}
+                <span
+                  className={cx(
+                    'tnum rounded-full bg-white px-2 py-0.5 text-xs font-semibold',
+                    factor.tone === 'danger' ? 'text-alfa' : 'text-warn',
+                  )}
+                >
+                  {factor.weight}
+                </span>
+              </span>
+            ))}
+          </div>
+          <div className="mt-6 flex gap-3 rounded-xl bg-canvas p-4 text-sm">
+            <Icon name="sparkle" size={18} className="mt-0.5 shrink-0 text-info" />
+            <p className="text-ink">
+              <span className="font-semibold">Рекомендация модели:</span> снизить сумму до 12 млн ₽ и увеличить срок до 36
+              мес — DSCR вырастет до 1,52, долговая нагрузка снизится до допустимого уровня.
+            </p>
+          </div>
+        </Card>
+        </div>
       </div>
     </div>
   )

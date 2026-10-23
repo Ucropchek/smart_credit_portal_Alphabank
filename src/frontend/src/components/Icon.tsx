@@ -25,6 +25,7 @@ const paths = {
   building: 'M4 21V5a2 2 0 0 1 2-2h8a2 2 0 0 1 2 2v16M16 9h2a2 2 0 0 1 2 2v10M8 7h4M8 11h4M8 15h4M3 21h18',
   user: 'M20 21a8 8 0 0 0-16 0M12 13a5 5 0 1 0 0-10 5 5 0 0 0 0 10z',
   trendUp: 'M3 17 9 11l4 4 8-8M15 7h6v6',
+  trendDown: 'M3 7 9 13l4-4 8 8M15 17h6v-6',
 } as const
 
 export type IconName = keyof typeof paths
