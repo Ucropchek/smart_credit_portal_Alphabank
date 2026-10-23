@@ -2,6 +2,7 @@ import { useEffect, useRef, useState } from 'react'
 import { Header, Sidebar, type Role, type Scenario, type Screen } from './components/Shell'
 import { Dashboard } from './screens/Dashboard'
 import { Tracker } from './screens/Tracker'
+import { Underwriter } from './screens/Underwriter'
 import { Wizard } from './screens/Wizard'
 
 const titles: Record<Screen, string> = {
@@ -72,6 +73,11 @@ function AppFrame({
           {screen === 'tracker' && (
             <div className="mx-auto max-w-[1280px] px-8 py-8">
               <Tracker scenario={scenario} />
+            </div>
+          )}
+          {screen === 'underwriter' && (
+            <div className="mx-auto max-w-[1280px] px-8 py-8">
+              <Underwriter />
             </div>
           )}
         </main>
