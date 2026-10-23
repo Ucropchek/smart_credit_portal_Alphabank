@@ -1,4 +1,5 @@
 import { useRef, useState } from 'react'
+import { entrepreneurName, hasRegistryRecord, lookupCompany, type CompanyLookup } from '../api/companies'
 import { cx } from '../components/cx'
 import { Icon } from '../components/Icon'
 import { Badge, Button, Card, CardHeader, Field, KV, inputCls } from '../components/ui'
@@ -45,9 +46,57 @@ const numFmt = (value: string) => {
   return digits ? new Intl.NumberFormat('ru-RU').format(Number(digits)) : ''
 }
 
+type LookupState =
+  | { status: 'idle' }
+  | { status: 'loading' }
+  | { status: 'error' }
+  | { status: 'empty' }
+  | { status: 'ready'; company: CompanyLookup }
+
+function RegistryCard({ company }: { company: CompanyLookup }) {
+  const entity = company.legalEntities[0]
+  const person = company.entrepreneurs[0]
+  const founded = company.foundedOrganizations[0]
+  const title = entity?.shortName ?? (person ? entrepreneurName(person) : founded?.shortName ?? 'Запись реестра')
+  const inn = entity?.inn ?? person?.inn ?? founded?.inn
+
+  return (
+    <div className="animate-fade-up mt-6 rounded-xl border border-line">
+      <div className="flex items-center gap-4 border-b border-line px-6 py-5">
+        <div className="grid size-12 place-items-center rounded-xl bg-canvas text-ink">
+          <Icon name={entity || founded ? 'building' : 'user'} size={22} />
+        </div>
+        <div className="flex-1">
+          <div className="text-[17px] font-semibold text-ink">{title}</div>
+          {inn && <div className="tnum text-sm text-muted">ИНН {inn}</div>}
+        </div>
+        <Badge tone="ok" dot>
+          Найдено в реестре
+        </Badge>
+      </div>
+      <div className="grid grid-cols-3 gap-x-8 gap-y-5 px-6 py-5">
+        {entity && <KV k="ОГРН" v={entity.ogrn} mono />}
+        {person && <KV k="ОГРНИП" v={person.ogrnip} mono />}
+        {person && entity && <KV k="ИП" v={entrepreneurName(person)} />}
+        {company.foundedOrganizations.map((organization) => (
+          <KV
+            key={organization.ogrn}
+            k="Доля в организации"
+            v={`${organization.shortName} · ${organization.sharePercent.toLocaleString('ru-RU')}%`}
+          />
+        ))}
+      </div>
+      <div className="flex items-center gap-2 border-t border-line bg-canvas/50 px-6 py-3 text-xs text-muted">
+        <Icon name="shield" size={14} className="text-ok" />
+        Источник: ЕГРЮЛ и ЕГРИП
+      </div>
+    </div>
+  )
+}
+
 export function Wizard({ onSubmit }: { onSubmit: () => void }) {
   const [inn, setInn] = useState('7701234567')
-  const [enrich, setEnrich] = useState<'idle' | 'loading' | 'done'>('done')
+  const [lookup, setLookup] = useState<LookupState>({ status: 'idle' })
   const [revenue, setRevenue] = useState('186 400 000')
   const [debt, setDebt] = useState('22 500 000')
   const [employees, setEmployees] = useState('84')
@@ -58,10 +107,16 @@ export function Wizard({ onSubmit }: { onSubmit: () => void }) {
   const [drag, setDrag] = useState(false)
   const fileRef = useRef<HTMLInputElement>(null)
 
-  const runEnrich = () => {
-    if (inn.replace(/\D/g, '').length < 10) return
-    setEnrich('loading')
-    setTimeout(() => setEnrich('done'), 1100)
+  const runEnrich = async () => {
+    const digits = inn.replace(/\D/g, '')
+    if (digits.length < 10) return
+    setLookup({ status: 'loading' })
+    try {
+      const company = await lookupCompany(digits)
+      setLookup(hasRegistryRecord(company) ? { status: 'ready', company } : { status: 'empty' })
+    } catch {
+      setLookup({ status: 'error' })
+    }
   }
 
   const addFiles = (files: FileList | null) => {
@@ -77,7 +132,7 @@ export function Wizard({ onSubmit }: { onSubmit: () => void }) {
     })
   }
 
-  const step1 = enrich === 'done'
+  const step1 = lookup.status === 'ready'
   const step2 = step1 && revenue.length > 0 && debt.length > 0
   const step3 = step2 && required.every((item) => docs.some((doc) => doc.kind === item && doc.state === 'ok'))
   const step = !step1 ? 1 : !step2 ? 2 : !step3 ? 3 : 4
@@ -107,10 +162,10 @@ export function Wizard({ onSubmit }: { onSubmit: () => void }) {
               title="1. О компании"
               subtitle="Введите ИНН — остальное заполним из государственных реестров"
               action={
-                enrich === 'done' && (
+                lookup.status === 'ready' && (
                   <Badge tone="ok">
                     <Icon name="checkCircle" size={14} strokeWidth={2.25} />
-                    Данные из ЕГРЮЛ и ФНС загружены
+                    Данные из ЕГРЮЛ и ЕГРИП загружены
                   </Badge>
                 )
               }
@@ -126,10 +181,10 @@ export function Wizard({ onSubmit }: { onSubmit: () => void }) {
                       inputMode="numeric"
                       onChange={(event) => {
                         setInn(event.target.value.replace(/\D/g, ''))
-                        setEnrich('idle')
+                        setLookup({ status: 'idle' })
                       }}
                     />
-                    {enrich === 'done' && (
+                    {lookup.status === 'ready' && (
                       <Icon
                         name="checkCircle"
                         size={20}
@@ -139,8 +194,8 @@ export function Wizard({ onSubmit }: { onSubmit: () => void }) {
                   </div>
                 </Field>
               </div>
-              <Button type="button" variant="secondary" onClick={runEnrich} disabled={enrich === 'loading'}>
-                {enrich === 'loading' ? (
+              <Button type="button" variant="secondary" onClick={runEnrich} disabled={lookup.status === 'loading'}>
+                {lookup.status === 'loading' ? (
                   <>
                     <span className="size-4 animate-spin rounded-full border-2 border-line border-t-ink" />
                     Запрос в реестры…
@@ -154,36 +209,14 @@ export function Wizard({ onSubmit }: { onSubmit: () => void }) {
               </Button>
             </div>
 
-            {enrich === 'done' ? (
-              <div className="animate-fade-up mt-6 rounded-xl border border-line">
-                <div className="flex items-center gap-4 border-b border-line px-6 py-5">
-                  <div className="grid size-12 place-items-center rounded-xl bg-canvas text-ink">
-                    <Icon name="building" size={22} />
-                  </div>
-                  <div className="flex-1">
-                    <div className="text-[17px] font-semibold text-ink">ООО «Вектор Логистик»</div>
-                    <div className="text-sm text-muted">Общество с ограниченной ответственностью · с 14.03.2017</div>
-                  </div>
-                  <Badge tone="ok" dot>
-                    Действующая
-                  </Badge>
-                </div>
-                <div className="grid grid-cols-3 gap-x-8 gap-y-5 px-6 py-5">
-                  <KV k="ОГРН" v="1177746258341" mono />
-                  <KV k="КПП" v="770101001" mono />
-                  <KV k="Уставный капитал" v="1 000 000 ₽" mono />
-                  <KV k="ОКВЭД" v="49.41 — Деятельность автомобильного грузового транспорта" />
-                  <KV k="Генеральный директор" v="Орлов Михаил Сергеевич" />
-                  <KV k="Юридический адрес" v="123112, г. Москва, Пресненская наб., д. 12, оф. 45" />
-                </div>
-                <div className="flex items-center gap-2 border-t border-line bg-canvas/50 px-6 py-3 text-xs text-muted">
-                  <Icon name="shield" size={14} className="text-ok" />
-                  Источники: ЕГРЮЛ, ФНС «Прозрачный бизнес», Росстат · актуально на 14.05.2026
-                </div>
-              </div>
+            {lookup.status === 'ready' ? (
+              <RegistryCard company={lookup.company} />
             ) : (
-              <div className="mt-6 grid h-[188px] place-items-center rounded-xl border border-dashed border-line text-sm text-muted">
-                {enrich === 'loading' ? 'Получаем данные из ЕГРЮЛ и ФНС…' : 'Нажмите «Найти», чтобы загрузить реквизиты'}
+              <div className="mt-6 grid h-[188px] place-items-center rounded-xl border border-dashed border-line px-6 text-center text-sm text-muted">
+                {lookup.status === 'loading' && 'Получаем данные из ЕГРЮЛ и ЕГРИП…'}
+                {lookup.status === 'idle' && 'Нажмите «Найти», чтобы загрузить реквизиты'}
+                {lookup.status === 'empty' && 'В реестре нет записи с таким ИНН'}
+                {lookup.status === 'error' && 'Не удалось запросить реестр'}
               </div>
             )}
           </Card>
