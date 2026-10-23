@@ -11,6 +11,7 @@ var connectionString = builder.Configuration["Postgres:ConnectionString"]
 
 builder.Services.AddNpgsqlDataSource(connectionString);
 builder.Services.AddSingleton<BkiConsentStore>();
+builder.Services.AddSingleton<PortalSchema>();
 
 var app = builder.Build();
 
@@ -1584,6 +1585,67 @@ app.Map("/bki-consent", async (HttpContext context, BkiConsentStore store, ILogg
     }
 });
 
+// Client application. The body has no BKI checkbox; it comes over /bki-consent.
+// This request only stores the form: no registry reads and no points. Tracking starts at "submitted".
+app.MapPost("/applications", async (ApplicationRequest? request, NpgsqlDataSource dataSource, PortalSchema portal) =>
+{
+    if (request is null)
+        return Results.BadRequest(new { error = "body must be a JSON object with purpose, amount, termMonths, inn and registrationId" });
+
+    var purpose = request.Purpose?.Trim();
+    var inn = request.Inn?.Trim();
+    var registrationId = request.RegistrationId?.Trim();
+
+    var problems = new List<string>();
+    if (string.IsNullOrEmpty(purpose))
+        problems.Add("purpose is required");
+    else if (purpose.Length > 1000)
+        problems.Add("purpose must be at most 1000 characters");
+    if (request.Amount is not { } amount || amount <= 0)
+        problems.Add("amount must be a positive number of roubles");
+    else if (amount != decimal.Round(amount, 2) || amount >= 10_000_000_000_000m)
+        problems.Add("amount must have at most 2 decimal places and at most 13 integer digits");
+    if (request.TermMonths is not > 0)
+        problems.Add("termMonths must be a positive whole number of months");
+    if (inn is null || inn.Length is not (10 or 12) || !inn.All(char.IsAsciiDigit))
+        problems.Add("inn must be 10 or 12 digits");
+    if (registrationId is null || registrationId.Length is not (13 or 15) || !registrationId.All(char.IsAsciiDigit))
+        problems.Add("registrationId must be a 13-digit OGRN or a 15-digit OGRNIP");
+    if (problems.Count > 0)
+        return Results.BadRequest(new { error = string.Join("; ", problems) });
+
+    await portal.EnsureAsync();
+
+    await using var command = dataSource.CreateCommand(
+        """
+        insert into portal.applications (purpose, amount, term_months, inn, registration_id)
+        values (@purpose, @amount, @termMonths, @inn, @registrationId)
+        returning id, step, submitted_at
+        """);
+    command.Parameters.AddWithValue("purpose", purpose!);
+    command.Parameters.AddWithValue("amount", request.Amount!.Value);
+    command.Parameters.AddWithValue("termMonths", request.TermMonths!.Value);
+    command.Parameters.AddWithValue("inn", inn!);
+    command.Parameters.AddWithValue("registrationId", registrationId!);
+    await using var reader = await command.ExecuteReaderAsync();
+    await reader.ReadAsync();
+
+    var number = reader.GetInt64(0);
+    var step = reader.GetString(1);
+    return Results.Created($"/applications/{number}", new
+    {
+        number,
+        purpose,
+        amount = request.Amount.Value,
+        termMonths = request.TermMonths.Value,
+        inn,
+        registrationId,
+        step,
+        stepTitle = ApplicationSteps.Title(step),
+        submittedAt = reader.GetFieldValue<DateTimeOffset>(2)
+    });
+});
+
 app.Run();
 
 // Last BKI checkbox event of every open /bki-consent connection. Checked is null until the first click.
@@ -1612,3 +1674,69 @@ sealed class BkiConsentStore
 }
 
 sealed record BkiConsentState(bool? Checked, DateTimeOffset? ChangedAt);
+
+sealed record ApplicationRequest(string? Purpose, decimal? Amount, int? TermMonths, string? Inn, string? RegistrationId);
+
+// Tracking steps the client sees. Titles match the tracker screen.
+static class ApplicationSteps
+{
+    public const string Submitted = "submitted";
+
+    public static string Title(string step) => step switch
+    {
+        Submitted => "Заявка подана",
+        "registryCheck" => "Проверка ФНС и БКИ",
+        "scoring" => "Кредитный скоринг",
+        "decision" => "Решение банка",
+        _ => step
+    };
+}
+
+// Applications live in schema portal of the same database. It is created on first use,
+// so the backend still starts while Postgres is not up yet.
+sealed class PortalSchema(NpgsqlDataSource dataSource)
+{
+    private readonly SemaphoreSlim gate = new(1, 1);
+    private volatile bool ready;
+
+    public async Task EnsureAsync()
+    {
+        if (ready)
+            return;
+
+        await gate.WaitAsync();
+        try
+        {
+            if (ready)
+                return;
+
+            await using var command = dataSource.CreateCommand(
+                """
+                create schema if not exists portal;
+
+                create table if not exists portal.applications (
+                    id bigint generated always as identity primary key,
+                    purpose text not null,
+                    amount numeric(15, 2) not null,
+                    term_months integer not null,
+                    inn varchar(12) not null,
+                    registration_id varchar(15) not null,
+                    step text not null default 'submitted',
+                    submitted_at timestamptz not null default now(),
+                    constraint ck_applications_purpose check (length(purpose) between 1 and 1000),
+                    constraint ck_applications_amount check (amount > 0),
+                    constraint ck_applications_term check (term_months > 0),
+                    constraint ck_applications_inn check (inn ~ '^([0-9]{10}|[0-9]{12})$'),
+                    constraint ck_applications_registration check (registration_id ~ '^([0-9]{13}|[0-9]{15})$'),
+                    constraint ck_applications_step check (step in ('submitted', 'registryCheck', 'scoring', 'decision'))
+                );
+                """);
+            await command.ExecuteNonQueryAsync();
+            ready = true;
+        }
+        finally
+        {
+            gate.Release();
+        }
+    }
+}
