@@ -8,6 +8,7 @@ export default defineConfig({
   server: {
     proxy: {
       '/companies': 'http://localhost:8080',
+      '/businesses': 'http://localhost:8080',
     },
   },
 })

@@ -1,6 +1,8 @@
 import { useRef, useState } from 'react'
+import { lookupBusiness, mspProfile, registrationId, type BusinessCard, type BkiObligation } from '../api/businesses'
 import { entrepreneurName, hasRegistryRecord, lookupCompany, type CompanyLookup } from '../api/companies'
 import { cx } from '../components/cx'
+import { rub } from '../format'
 import { Icon } from '../components/Icon'
 import { Badge, Button, Card, CardHeader, Field, KV, inputCls } from '../components/ui'
 
@@ -51,33 +53,147 @@ type LookupState =
   | { status: 'loading' }
   | { status: 'error' }
   | { status: 'empty' }
-  | { status: 'ready'; company: CompanyLookup }
+  | { status: 'ready'; company: CompanyLookup; profile: BusinessCard | null; profileFailed: boolean }
 
-function RegistryCard({ company }: { company: CompanyLookup }) {
+const mspCategory: Record<string, string> = {
+  '1': 'Микропредприятие',
+  '2': 'Малое предприятие',
+  '3': 'Среднее предприятие',
+}
+
+const procedureName: Record<string, string> = {
+  FinancialRecovery: 'Финансовое оздоровление',
+  ExternalManagement: 'Внешнее управление',
+  Tender: 'Конкурсное производство',
+  Watching: 'Наблюдение',
+  CitizenAssetsDisposal: 'Реализация имущества гражданина',
+  CitizenDebtRestructuring: 'Реструктуризация долгов гражданина',
+}
+
+const scheduleName: Record<string, string> = {
+  '1': 'срок платежа не наступил',
+  '2': 'платежи вовремя',
+  '3': 'платежи с просрочкой',
+}
+
+const roleName: Record<string, string> = {
+  company: 'компания',
+  entrepreneur: 'предприниматель',
+  director: 'руководитель',
+  founder: 'учредитель',
+}
+
+function ruDate(iso: string) {
+  const [year, month, day] = iso.split('-')
+  return day && month && year ? `${day}.${month}.${year}` : iso
+}
+
+function roleLabel(whose: BkiObligation['whose']) {
+  const roles = Array.isArray(whose) ? whose : [whose]
+  return roles.map((role) => roleName[role] ?? role).join(', ')
+}
+
+function RegistryCard({
+  company,
+  profile,
+  profileFailed,
+}: {
+  company: CompanyLookup
+  profile: BusinessCard | null
+  profileFailed: boolean
+}) {
   const entity = company.legalEntities[0]
   const person = company.entrepreneurs[0]
   const founded = company.foundedOrganizations[0]
-  const title = entity?.shortName ?? (person ? entrepreneurName(person) : founded?.shortName ?? 'Запись реестра')
-  const inn = entity?.inn ?? person?.inn ?? founded?.inn
+  const title = profile?.business.name ?? entity?.shortName ?? (person ? entrepreneurName(person) : founded?.shortName ?? 'Запись реестра')
+  const inn = profile?.business.inn ?? entity?.inn ?? person?.inn ?? founded?.inn
+  const msp = profile ? mspProfile(profile) : null
+  const liquidated = profile?.business.liquidated ?? false
+  const statusNote = profile?.business.status
+  const flags = profile
+    ? [
+        profile.stops.overdue ? 'Просрочка в БКИ' : null,
+        profile.fns.disqualified ? 'Дисквалификация' : null,
+        profile.fns.massLeader ? 'Массовый руководитель' : null,
+        profile.fns.massFounder ? 'Массовый учредитель' : null,
+        profile.fns.massAddress ? 'Массовый адрес' : null,
+        profile.fns.hasBailiffDebt ? 'Долг у приставов' : null,
+        msp?.newBusiness ? 'Вновь созданный' : null,
+        profile.fns.accountBlocked ? 'Счёт заблокирован' : null,
+      ].filter((flag): flag is string => Boolean(flag))
+    : []
 
   return (
     <div className="animate-fade-up mt-6 rounded-xl border border-line">
       <div className="flex items-center gap-4 border-b border-line px-6 py-5">
         <div className="grid size-12 place-items-center rounded-xl bg-canvas text-ink">
-          <Icon name={entity || founded ? 'building' : 'user'} size={22} />
+          <Icon name={entity || founded || profile?.business.kind === 'legal_entity' ? 'building' : 'user'} size={22} />
         </div>
         <div className="flex-1">
           <div className="text-[17px] font-semibold text-ink">{title}</div>
           {inn && <div className="tnum text-sm text-muted">ИНН {inn}</div>}
+          {profile?.business.registrationDate && (
+            <div className="mt-1 text-sm text-muted">с {ruDate(profile.business.registrationDate)}</div>
+          )}
         </div>
-        <Badge tone="ok" dot>
-          Найдено в реестре
+        <Badge
+          tone={!profile ? 'ok' : liquidated ? 'danger' : profile.fedresurs.bankruptcyActive || statusNote ? 'warn' : 'ok'}
+          dot
+        >
+          {!profile
+            ? 'Найдено в реестре'
+            : liquidated
+              ? 'Прекращена'
+              : profile.fedresurs.bankruptcyActive
+                ? 'Банкротство'
+                : statusNote
+                  ? 'Особый статус'
+                  : 'Действующая'}
         </Badge>
       </div>
+      {statusNote && <div className="border-b border-line px-6 py-3 text-sm text-ink">{statusNote}</div>}
       <div className="grid grid-cols-3 gap-x-8 gap-y-5 px-6 py-5">
         {entity && <KV k="ОГРН" v={entity.ogrn} mono />}
         {person && <KV k="ОГРНИП" v={person.ogrnip} mono />}
         {person && entity && <KV k="ИП" v={entrepreneurName(person)} />}
+        {profile && (
+          <KV
+            k="МСП"
+            v={
+              msp
+                ? [mspCategory[msp.categoryCode ?? ''] ?? 'Категория не указана', msp.headcount == null ? null : `численность ${msp.headcount.toLocaleString('ru-RU')}`]
+                    .filter(Boolean)
+                    .join(' · ')
+                : 'Нет в реестре'
+            }
+          />
+        )}
+        {profile && (
+          <KV k="Налоговая задолженность" v={profile.fns.arrearsTotal == null ? 'Нет данных' : rub(profile.fns.arrearsTotal)} mono />
+        )}
+        {profile && (
+          <KV
+            k="Иски к ответчику"
+            v={
+              profile.arbitration.openDefendantCases > 0
+                ? `${profile.arbitration.openDefendantCases} · ${rub(profile.arbitration.openClaimSum)}`
+                : 'Нет открытых дел'
+            }
+            mono
+          />
+        )}
+        {profile && (
+          <KV
+            k="Банкротство"
+            v={
+              profile.fedresurs.bankruptcyActive
+                ? procedureName[profile.fedresurs.procedureType ?? ''] ?? profile.fedresurs.procedureType ?? 'Процедура идёт'
+                : 'Нет действующей процедуры'
+            }
+          />
+        )}
+        {profile && <KV k="Залог" v={profile.fedresurs.pledgeActive ? 'Есть действующий залог' : 'Нет'} />}
+        {profile && profile.fns.accountBlocked == null && <KV k="Блокировка счёта" v="Нет данных" />}
         {company.foundedOrganizations.map((organization) => (
           <KV
             key={organization.ogrn}
@@ -86,9 +202,34 @@ function RegistryCard({ company }: { company: CompanyLookup }) {
           />
         ))}
       </div>
+      {flags.length > 0 && (
+        <div className="flex flex-wrap gap-2 px-6 pb-5">
+          {flags.map((flag) => (
+            <Badge key={flag} tone="warn">
+              {flag}
+            </Badge>
+          ))}
+        </div>
+      )}
+      {profile && profile.bki.length > 0 && (
+        <div className="space-y-3 border-t border-line px-6 py-5">
+          <div className="text-xs text-muted">Обязательства в БКИ</div>
+          {profile.bki.map((row, index) => (
+            <div key={`${row.inn}-${index}`} className="text-sm text-ink">
+              <span className="font-medium">{roleLabel(row.whose)}</span>
+              <span className="text-muted"> · ИНН {row.inn} · </span>
+              <span className="tnum">просрочка {rub(row.debtOverdueSum)}</span>
+              <span className="text-muted"> · {scheduleName[row.scheduleCode ?? ''] ?? 'код срока не указан'}</span>
+            </div>
+          ))}
+        </div>
+      )}
+      {profileFailed && (
+        <div className="border-t border-line px-6 py-3 text-sm text-muted">Карточка ФНС, МСП, БКИ и Федресурса не загрузилась</div>
+      )}
       <div className="flex items-center gap-2 border-t border-line bg-canvas/50 px-6 py-3 text-xs text-muted">
         <Icon name="shield" size={14} className="text-ok" />
-        Источник: ЕГРЮЛ и ЕГРИП
+        {profile ? 'Источник: ЕГРЮЛ, ЕГРИП, ФНС, МСП, БКИ, Федресурс и арбитраж' : 'Источник: ЕГРЮЛ и ЕГРИП'}
       </div>
     </div>
   )
@@ -113,7 +254,21 @@ export function Wizard({ onSubmit }: { onSubmit: () => void }) {
     setLookup({ status: 'loading' })
     try {
       const company = await lookupCompany(digits)
-      setLookup(hasRegistryRecord(company) ? { status: 'ready', company } : { status: 'empty' })
+      if (!hasRegistryRecord(company)) {
+        setLookup({ status: 'empty' })
+        return
+      }
+      const id = registrationId(company)
+      let profile: BusinessCard | null = null
+      let profileFailed = false
+      if (id) {
+        try {
+          profile = await lookupBusiness(id)
+        } catch {
+          profileFailed = true
+        }
+      }
+      setLookup({ status: 'ready', company, profile, profileFailed })
     } catch {
       setLookup({ status: 'error' })
     }
@@ -165,7 +320,9 @@ export function Wizard({ onSubmit }: { onSubmit: () => void }) {
                 lookup.status === 'ready' && (
                   <Badge tone="ok">
                     <Icon name="checkCircle" size={14} strokeWidth={2.25} />
-                    Данные из ЕГРЮЛ и ЕГРИП загружены
+                    {lookup.status === 'ready' && lookup.profile
+                      ? 'Карточка реестров загружена'
+                      : 'Данные из ЕГРЮЛ и ЕГРИП загружены'}
                   </Badge>
                 )
               }
@@ -210,7 +367,7 @@ export function Wizard({ onSubmit }: { onSubmit: () => void }) {
             </div>
 
             {lookup.status === 'ready' ? (
-              <RegistryCard company={lookup.company} />
+              <RegistryCard company={lookup.company} profile={lookup.profile} profileFailed={lookup.profileFailed} />
             ) : (
               <div className="mt-6 grid h-[188px] place-items-center rounded-xl border border-dashed border-line px-6 text-center text-sm text-muted">
                 {lookup.status === 'loading' && 'Получаем данные из ЕГРЮЛ и ЕГРИП…'}
