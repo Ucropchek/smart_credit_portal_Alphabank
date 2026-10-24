@@ -9,6 +9,10 @@ export default defineConfig({
     proxy: {
       '/companies': 'http://localhost:8080',
       '/businesses': 'http://localhost:8080',
+      '/bki-consent': {
+        target: 'http://localhost:8080',
+        ws: true,
+      },
     },
   },
 })

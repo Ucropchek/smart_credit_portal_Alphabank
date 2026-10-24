@@ -1,4 +1,5 @@
 import { useRef, useState } from 'react'
+import { useBkiConsent } from '../api/bkiConsent'
 import { lookupBusiness, mspProfile, registrationId, type BusinessCard, type BkiObligation } from '../api/businesses'
 import { entrepreneurName, hasRegistryRecord, lookupCompany, type CompanyLookup } from '../api/companies'
 import { cx } from '../components/cx'
@@ -235,7 +236,16 @@ function RegistryCard({
   )
 }
 
+function consentText(link: 'connecting' | 'open' | 'closed', saved: boolean | null) {
+  if (link === 'connecting') return 'Подключаемся к серверу согласия…'
+  if (link === 'closed') return 'Нет связи с сервером согласия'
+  if (saved === true) return 'Согласие записано на сервере'
+  if (saved === false) return 'Отказ записан на сервере'
+  return 'Отметка ещё не записана. Она живёт, пока открыта эта страница.'
+}
+
 export function Wizard({ onSubmit }: { onSubmit: () => void }) {
+  const consent = useBkiConsent()
   const [inn, setInn] = useState('7701234567')
   const [lookup, setLookup] = useState<LookupState>({ status: 'idle' })
   const [revenue, setRevenue] = useState('186 400 000')
@@ -507,6 +517,19 @@ export function Wizard({ onSubmit }: { onSubmit: () => void }) {
                   />
                 </div>
               </div>
+              <label className="mt-6 flex items-start gap-3 rounded-xl border border-line px-4 py-3">
+                <input
+                  type="checkbox"
+                  className="mt-1 size-4 accent-alfa"
+                  checked={consent.checked}
+                  disabled={consent.link !== 'open'}
+                  onChange={(event) => consent.toggle(event.target.checked)}
+                />
+                <span>
+                  <span className="block text-sm font-medium text-ink">Разрешаю запрос кредитной истории в БКИ</span>
+                  <span className="mt-1 block text-xs text-muted">{consentText(consent.link, consent.saved)}</span>
+                </span>
+              </label>
               <Button type="button" size="lg" className="mt-6 w-full" disabled={!step3} onClick={onSubmit}>
                 Отправить в банк
               </Button>
