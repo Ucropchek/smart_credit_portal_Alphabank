@@ -1,10 +1,24 @@
-export type LegalEntity = {
+export type RegistryIdentity = {
   ogrn: string
   inn: string
   shortName: string
 }
 
-export type FoundedOrganization = LegalEntity & {
+export type LegalEntity = RegistryIdentity & {
+  kpp: string
+  opfFullName: string
+  ogrnDate: string
+  capitalAmount: number
+  statusName: string | null
+  terminationName: string | null
+  address: string | null
+  mainOkvedCode: string | null
+  mainOkvedName: string | null
+  directorName: string | null
+  directorPosition: string | null
+}
+
+export type FoundedOrganization = RegistryIdentity & {
   shareNominal: number
   sharePercent: number
 }

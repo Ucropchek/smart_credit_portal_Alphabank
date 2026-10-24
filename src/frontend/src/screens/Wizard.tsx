@@ -1,5 +1,6 @@
 import { useRef, useState } from 'react'
-import { entrepreneurName, hasRegistryRecord, lookupCompany, type CompanyLookup } from '../api/companies'
+import { entrepreneurName, hasRegistryRecord, lookupCompany, type CompanyLookup, type LegalEntity } from '../api/companies'
+import { rub } from '../format'
 import { cx } from '../components/cx'
 import { Icon } from '../components/Icon'
 import { Badge, Button, Card, CardHeader, Field, KV, inputCls } from '../components/ui'
@@ -53,12 +54,30 @@ type LookupState =
   | { status: 'empty' }
   | { status: 'ready'; company: CompanyLookup }
 
+function ruDate(iso: string) {
+  const [year, month, day] = iso.split('-')
+  return day && month && year ? `${day}.${month}.${year}` : iso
+}
+
+function entityState(entity: LegalEntity) {
+  if (entity.terminationName) return { tone: 'danger' as const, label: 'Прекращена', note: entity.terminationName }
+  if (entity.statusName) return { tone: 'warn' as const, label: 'Особый статус', note: entity.statusName }
+  return { tone: 'ok' as const, label: 'Действующая', note: null }
+}
+
 function RegistryCard({ company }: { company: CompanyLookup }) {
   const entity = company.legalEntities[0]
   const person = company.entrepreneurs[0]
   const founded = company.foundedOrganizations[0]
   const title = entity?.shortName ?? (person ? entrepreneurName(person) : founded?.shortName ?? 'Запись реестра')
   const inn = entity?.inn ?? person?.inn ?? founded?.inn
+  const state = entity ? entityState(entity) : null
+  const okved = entity?.mainOkvedCode
+    ? [entity.mainOkvedCode, entity.mainOkvedName].filter(Boolean).join(' — ')
+    : null
+  const director = entity?.directorName
+    ? [entity.directorName, entity.directorPosition].filter(Boolean).join(' · ')
+    : null
 
   return (
     <div className="animate-fade-up mt-6 rounded-xl border border-line">
@@ -69,13 +88,34 @@ function RegistryCard({ company }: { company: CompanyLookup }) {
         <div className="flex-1">
           <div className="text-[17px] font-semibold text-ink">{title}</div>
           {inn && <div className="tnum text-sm text-muted">ИНН {inn}</div>}
+          {entity && (
+            <div className="mt-1 text-sm text-muted">
+              {entity.opfFullName} · с {ruDate(entity.ogrnDate)}
+            </div>
+          )}
         </div>
-        <Badge tone="ok" dot>
-          Найдено в реестре
+        <Badge tone={state?.tone ?? 'ok'} dot>
+          {state?.label ?? 'Найдено в реестре'}
         </Badge>
       </div>
+      {state?.note && (
+        <div className="border-b border-line px-6 py-3 text-sm text-ink">{state.note}</div>
+      )}
       <div className="grid grid-cols-3 gap-x-8 gap-y-5 px-6 py-5">
         {entity && <KV k="ОГРН" v={entity.ogrn} mono />}
+        {entity && <KV k="КПП" v={entity.kpp} mono />}
+        {entity && <KV k="Уставный капитал" v={rub(entity.capitalAmount)} mono />}
+        {okved && (
+          <div className="col-span-3">
+            <KV k="Основной ОКВЭД" v={okved} />
+          </div>
+        )}
+        {director && <KV k="Руководитель" v={director} />}
+        {entity?.address && (
+          <div className="col-span-3">
+            <KV k="Юридический адрес" v={entity.address} />
+          </div>
+        )}
         {person && <KV k="ОГРНИП" v={person.ogrnip} mono />}
         {person && entity && <KV k="ИП" v={entrepreneurName(person)} />}
         {company.foundedOrganizations.map((organization) => (
