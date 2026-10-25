@@ -91,6 +91,25 @@ export type ApplicationDetail = {
   requests?: InformationRequest[]
   registries?: RegistrySnapshot
   statement?: AccountStatement
+  purposeCategory?: {
+    matches?: PurposeMatch[]
+  } | null
+}
+
+export type PurposeMatch = {
+  code: string
+  title: string
+  keywords: string[]
+}
+
+export function purposeMatches(category: ApplicationDetail['purposeCategory']): PurposeMatch[] {
+  const matches = category?.matches
+  if (!Array.isArray(matches)) return []
+  return matches.flatMap((match) => {
+    if (!match || typeof match.code !== 'string' || typeof match.title !== 'string') return []
+    const keywords = Array.isArray(match.keywords) ? match.keywords.filter((item) => typeof item === 'string') : []
+    return [{ code: match.code, title: match.title, keywords }]
+  })
 }
 
 export type TurnoverMonth = {

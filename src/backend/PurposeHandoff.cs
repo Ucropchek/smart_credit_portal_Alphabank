@@ -136,7 +136,7 @@ static class PurposeHandoff
             var code = reader.GetString(0);
             var title = reader.GetString(1);
             var keywords = reader.GetFieldValue<string[]>(2);
-            var hits = keywords.Where(keyword => text.Contains(Normalize(keyword), StringComparison.Ordinal)).Distinct().ToList();
+            var hits = keywords.Where(keyword => ContainsWord(text, Normalize(keyword))).Distinct().ToList();
             if (hits.Count > 0)
                 found.Add((code, title, hits));
         }
@@ -150,6 +150,24 @@ static class PurposeHandoff
 
     static string Normalize(string value) =>
         value.ToLowerInvariant().Replace('ё', 'е');
+
+    // A stem matches the start of a word. "зерно" must not fire inside "фрезерного".
+    static bool ContainsWord(string text, string keyword)
+    {
+        if (keyword.Length == 0)
+            return false;
+        var start = 0;
+        while (start <= text.Length - keyword.Length)
+        {
+            var index = text.IndexOf(keyword, start, StringComparison.Ordinal);
+            if (index < 0)
+                return false;
+            if (index == 0 || !char.IsLetter(text[index - 1]))
+                return true;
+            start = index + 1;
+        }
+        return false;
+    }
 
     static string Trim(string message) =>
         message.Length <= 500 ? message : message[..500];

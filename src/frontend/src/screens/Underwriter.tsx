@@ -5,6 +5,7 @@ import {
   decideApplication,
   getApplication,
   listApplications,
+  purposeMatches,
   scoreApplication,
   type AccountStatement,
   type ApplicationDetail,
@@ -99,6 +100,31 @@ function RegistryFacts({ registries }: { registries: RegistrySnapshot }) {
       <KV k="БКИ" v={bki} />
       {flags.length > 0 && <KV k="Флаги ФНС" v={flags.join(', ')} />}
     </div>
+  )
+}
+
+function PurposeFacts({ detail }: { detail: ApplicationDetail }) {
+  const matches = purposeMatches(detail.purposeCategory)
+  const checked = detail.purposeCategory != null
+
+  return (
+    <Card className="p-8">
+      <CardHeader title="Категории цели" subtitle="Текст цели сопоставлен со справочником товаров" />
+      {matches.length > 0 ? (
+        <ul className="mt-6 space-y-3">
+          {matches.map((match) => (
+            <li key={match.code} className="rounded-xl border border-line px-4 py-3">
+              <div className="text-sm font-medium text-ink">{match.title}</div>
+              {match.keywords.length > 0 && <div className="mt-1 text-sm text-muted">{match.keywords.join(', ')}</div>}
+            </li>
+          ))}
+        </ul>
+      ) : (
+        <p className="mt-4 text-sm text-muted">
+          {checked ? 'По тексту цели конкретные категории не нашлись.' : 'Категории появятся после проверки реестров или скоринга.'}
+        </p>
+      )}
+    </Card>
   )
 }
 
@@ -378,6 +404,8 @@ export function Underwriter({ onCount }: { onCount?: (count: number) => void }) 
                   />
                 </div>
               </Card>
+
+              <PurposeFacts detail={detail} />
 
               <Card className="p-8">
                 <CardHeader

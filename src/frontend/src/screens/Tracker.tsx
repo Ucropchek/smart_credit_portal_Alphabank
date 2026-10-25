@@ -1,5 +1,5 @@
 import { useEffect, useState } from 'react'
-import { answerApplication, getApplication, saveStatement, type ApplicationDetail } from '../api/applications'
+import { answerApplication, getApplication, purposeMatches, saveStatement, type ApplicationDetail } from '../api/applications'
 import { cx } from '../components/cx'
 import { Icon } from '../components/Icon'
 import type { Scenario } from '../components/Shell'
@@ -88,6 +88,7 @@ function LiveApplication({ number }: { number: number }) {
   const failed = current?.failed ?? false
   const active = detail ? Math.max(0, ['submitted', 'registryCheck', 'scoring', 'decision'].indexOf(detail.step)) : 0
   const verdict = detail?.employeeDecision ? clientDecision[detail.employeeDecision.outcome] : undefined
+  const goalMatches = purposeMatches(detail?.purposeCategory)
 
   const fillExample = () => {
     setRows((current) =>
@@ -278,6 +279,15 @@ function LiveApplication({ number }: { number: number }) {
 
           <Card className="p-8">
             <CardHeader title={verdict?.title ?? detail.stepTitle} subtitle={detail.purpose} />
+            {goalMatches.length > 0 && (
+              <ul className="mt-4 flex flex-wrap gap-2">
+                {goalMatches.map((match) => (
+                  <li key={match.code} className="rounded-full bg-canvas px-3 py-1.5 text-xs font-medium text-ink">
+                    {match.title}
+                  </li>
+                ))}
+              </ul>
+            )}
             {detail.employeeDecision?.reason?.trim() && (
               <p className="mt-6 text-sm text-ink">{detail.employeeDecision.reason}</p>
             )}
