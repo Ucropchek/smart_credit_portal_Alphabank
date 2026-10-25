@@ -18,7 +18,8 @@ import { DocumentsCard } from '../components/DocumentsCard'
 import { FinancesCard } from '../components/FinancesCard'
 import { GoodsCard } from '../components/GoodsCard'
 import { Badge, Button, Card, CardHeader, KV } from '../components/ui'
-import { monthLabel, months, rub } from '../format'
+import { annuity, monthLabel, months, rub, ruDate } from '../format'
+import { preliminaryRate } from '../productRate'
 
 const decisionLabel: Record<string, string> = {
   approve: 'Одобрение',
@@ -119,6 +120,21 @@ function RegistryFacts({ registries }: { registries: RegistrySnapshot }) {
         <KV k="Банкротство" v={bankruptcy} />
         <KV k="Залог" v={registries.fedresurs.pledgeActive ? 'Есть' : 'Нет'} />
         <KV k="Иски к ответчику" v={`${registries.arbitration.openDefendantCases} · ${rub(registries.arbitration.openClaimSum)}`} mono />
+        {typeof registries.fns.revenue === 'number' && (
+          <KV
+            k="Доходы по ФНС"
+            v={`${rub(registries.fns.revenue)}${registries.fns.revenueDate ? ` · ${ruDate(registries.fns.revenueDate)}` : ''}`}
+            mono
+          />
+        )}
+        {typeof registries.fns.expenses === 'number' && <KV k="Расходы по ФНС" v={rub(registries.fns.expenses)} mono />}
+        {typeof registries.fns.employeeCount === 'number' && (
+          <KV
+            k="Численность по ФНС"
+            v={`${registries.fns.employeeCount.toLocaleString('ru-RU')}${registries.fns.employeeCountDate ? ` · ${ruDate(registries.fns.employeeCountDate)}` : ''}`}
+            mono
+          />
+        )}
         <KV k="Налоговая задолженность" v={registries.fns.arrearsTotal == null ? 'Нет данных' : rub(registries.fns.arrearsTotal)} mono />
         <KV k="Блокировка счёта" v={registries.fns.accountBlocked == null ? 'Нет данных' : registries.fns.accountBlocked ? 'Есть' : 'Нет'} />
         <KV k="БКИ" v={bki} />
@@ -164,7 +180,7 @@ function PurposeFacts({ detail }: { detail: ApplicationDetail }) {
         </ul>
       ) : (
         <p className="mt-4 text-sm text-muted">
-          {checked ? 'По тексту цели конкретные категории не нашлись.' : 'Категории появятся после проверки реестров или скоринга.'}
+          {checked ? 'По тексту цели конкретные категории не нашлись.' : 'Категории появятся, когда по заявке запустится поиск товаров.'}
         </p>
       )}
     </Card>
@@ -245,6 +261,7 @@ export function Underwriter({
   const [checking, setChecking] = useState(false)
   const [checkError, setCheckError] = useState<string | null>(null)
   const onCountRef = useRef(onCount)
+  const busy = useRef(false)
 
   useEffect(() => {
     onCountRef.current = onCount
@@ -272,27 +289,53 @@ export function Underwriter({
   useEffect(() => {
     if (selected == null) return
     let cancel = false
+    let seen = false
+    const rememberQuiet = (app: ApplicationDetail) => {
+      seen = true
+      setLoaded(app)
+      setErrorFor(null)
+      setRows((current) =>
+        current?.map((row) =>
+          row.number === app.number
+            ? { ...row, step: app.step, stepTitle: app.stepTitle, employeeDecision: app.employeeDecision?.outcome ?? null }
+            : row,
+        ) ?? current,
+      )
+    }
     getApplication(selected, 'bank')
       .then((app) => {
-        if (!cancel) {
-          setLoaded(app)
-          setErrorFor(null)
-          setOutcome(savedOutcome(app))
-          setReason(app.employeeDecision?.reason ?? '')
-          setDecisionError(null)
-        }
+        if (cancel) return
+        rememberQuiet(app)
+        setOutcome(savedOutcome(app))
+        setReason(app.employeeDecision?.reason ?? '')
+        setDecisionError(null)
       })
       .catch(() => {
-        if (!cancel) setErrorFor(selected)
+        if (!cancel && !seen) setErrorFor(selected)
       })
+    const timer = window.setInterval(() => {
+      if (busy.current) return
+      getApplication(selected, 'bank')
+        .then((app) => {
+          if (!cancel) rememberQuiet(app)
+        })
+        .catch(() => {
+          if (!cancel && !seen) setErrorFor(selected)
+        })
+    }, 5000)
     return () => {
       cancel = true
+      window.clearInterval(timer)
     }
   }, [selected])
 
   const detail = loaded?.number === selected ? loaded : null
   const failed = errorFor === selected && selected != null
   const recorded = detail?.employeeDecision?.outcome
+  const rate = detail ? preliminaryRate(detail.purpose, detail.amount, detail.termMonths) : null
+  const paymentAmount = detail?.counterOffer && detail.counterOffer.amount > 0 ? detail.counterOffer.amount : detail?.amount
+  const paymentTerm = detail?.counterOffer?.termMonths ?? detail?.termMonths
+  const payment = rate != null && paymentAmount != null && paymentTerm != null ? annuity(paymentAmount, rate, paymentTerm) : null
 
   const remember = (app: ApplicationDetail) => {
     setLoaded(app)
@@ -309,6 +352,7 @@ export function Underwriter({
 
   const score = async () => {
     if (selected == null) return
+    busy.current = true
     setScoring(true)
     setScoreError(null)
     try {
@@ -324,6 +368,7 @@ export function Underwriter({
     } catch (error) {
       setScoreError(error instanceof Error ? error.message : 'Не удалось посчитать скоринг')
     } finally {
+      busy.current = false
       setScoring(false)
     }
   }
@@ -338,6 +383,7 @@ export function Underwriter({
       setDecisionError('Напишите причину отказа')
       return
     }
+    busy.current = true
     setDeciding(true)
     setDecisionError(null)
     try {
@@ -345,6 +391,7 @@ export function Underwriter({
     } catch (error) {
       setDecisionError(error instanceof Error ? error.message : 'Не удалось записать решение')
     } finally {
+      busy.current = false
       setDeciding(false)
     }
   }
@@ -355,6 +402,7 @@ export function Underwriter({
       setAskError('Напишите вопрос')
       return
     }
+    busy.current = true
     setAsking(true)
     setAskError(null)
     try {
@@ -364,12 +412,14 @@ export function Underwriter({
     } catch (error) {
       setAskError(error instanceof Error ? error.message : 'Не удалось отправить вопрос')
     } finally {
+      busy.current = false
       setAsking(false)
     }
   }
 
   const check = async () => {
     if (selected == null) return
+    busy.current = true
     setChecking(true)
     setCheckError(null)
     try {
@@ -385,6 +435,7 @@ export function Underwriter({
     } catch (error) {
       setCheckError(error instanceof Error ? error.message : 'Не удалось проверить реестры')
     } finally {
+      busy.current = false
       setChecking(false)
     }
   }
@@ -470,7 +521,12 @@ export function Underwriter({
                 <FinancesCard
                   finances={detail.finances}
                   amount={detail.amount}
-                  subtitle="Клиент указал их при подаче. Реестр эти цифры не подтверждал"
+                  registry={detail.registries?.fns}
+                  subtitle={
+                    typeof detail.registries?.fns.revenue === 'number'
+                      ? 'Рядом — доходы и численность из снимка ФНС'
+                      : 'Клиент указал их при подаче. Доходы ФНС появятся после обновления снимка реестров'
+                  }
                 />
               )}
 
@@ -626,6 +682,8 @@ export function Underwriter({
                       <div className="mt-6 grid grid-cols-2 gap-x-8 gap-y-5 border-t border-line pt-6">
                         <KV k="Продукт" v={productLabel[detail.product.code] ?? detail.product.code} />
                         <KV k="Лимит по баллу" v={rub(detail.product.maxAmount)} mono />
+                        {rate != null && <KV k="Предварительная ставка" v={`от ${rate.toLocaleString('ru-RU')}%`} />}
+                        {payment != null && <KV k="Платёж по этой ставке" v={`${rub(payment)}/мес`} mono />}
                         {detail.counterOffer && detail.counterOffer.amount < detail.amount && (
                           <KV k="Сумма в пределах лимита" v={rub(detail.counterOffer.amount)} mono />
                         )}

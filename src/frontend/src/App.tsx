@@ -1,8 +1,10 @@
 import { useEffect, useRef, useState } from 'react'
 import { listApplications, type LoanDraft } from './api/applications'
-import { Header, Sidebar, type Role, type Scenario, type Screen } from './components/Shell'
+import { Header, Sidebar, type Role, type Scenario, type Screen, type ServiceId } from './components/Shell'
+import { serviceMenu } from './serviceMenu'
 import { Dashboard } from './screens/Dashboard'
 import { Tracker } from './screens/Tracker'
+import { Services } from './screens/Services'
 import { Underwriter } from './screens/Underwriter'
 import { Wizard } from './screens/Wizard'
 
@@ -32,7 +34,8 @@ function AppFrame({
   scenario,
   draft,
   applicationNumber,
-  trackerLive,
+  scenarioArmed,
+  service,
   bankQueue,
   clientCount,
   focusNumber,
@@ -43,6 +46,7 @@ function AppFrame({
   onOpenApp,
   onBackToList,
   onSubmitted,
+  onService,
   onRole,
   onScenario,
   go,
@@ -56,7 +60,8 @@ function AppFrame({
   scenario: Scenario
   draft: LoanDraft
   applicationNumber: number | null
-  trackerLive: boolean
+  scenarioArmed: boolean
+  service: ServiceId | null
   bankQueue: number | null
   clientCount: number | null
   focusNumber: number | null
@@ -67,6 +72,7 @@ function AppFrame({
   onOpenApp: (number: number) => void
   onBackToList: () => void
   onSubmitted: (number: number) => void
+  onService: (id: ServiceId) => void
   onRole: (r: Role) => void
   onScenario: (s: Scenario) => void
   go: (s: Screen) => void
@@ -79,45 +85,58 @@ function AppFrame({
 
   useEffect(() => {
     mainRef.current?.scrollTo({ top: 0 })
-  }, [screen])
+  }, [screen, service])
 
   return (
     <div className={fill ? 'flex h-screen' : 'flex min-h-[960px]'}>
-      <Sidebar role={role} screen={screen} queueCount={bankQueue} applicationCount={clientCount} onNavigate={go} />
+      <Sidebar
+        role={role}
+        screen={screen}
+        service={service}
+        queueCount={bankQueue}
+        applicationCount={clientCount}
+        onNavigate={go}
+        onService={onService}
+      />
       <div className="flex min-w-0 flex-1 flex-col">
         <Header
           role={role}
           onRole={onRole}
           scenario={scenario}
           onScenario={onScenario}
-          title={titles[screen]}
+          title={service ? (serviceMenu[role].find((item) => item.id === service)?.label ?? titles[screen]) : titles[screen]}
           overview={overview}
           onOverview={onOverview}
           onOpenNotice={onOpenNotice}
         />
         <main ref={mainRef} className={fill ? 'flex-1 overflow-y-auto' : 'flex-1'}>
-          {screen === 'dashboard' && (
+          {service && (
+            <div className="mx-auto max-w-[1280px] px-8 py-8">
+              <Services key={`${role}:${service}`} role={role} service={service} onOpen={onOpenApp} />
+            </div>
+          )}
+          {!service && screen === 'dashboard' && (
             <div className="mx-auto max-w-[1280px] px-8 py-8">
               <Dashboard onApply={onApply} onOpenApp={onOpenApp} onCount={onClientCount} />
             </div>
           )}
-          {screen === 'wizard' && (
+          {!service && screen === 'wizard' && (
             <div className="mx-auto max-w-[1280px] px-8 py-8">
               <Wizard key={`${draft.purpose}:${draft.amount}:${draft.termMonths}`} initial={draft} onSubmit={onSubmitted} />
             </div>
           )}
-          {screen === 'tracker' && (
+          {!service && screen === 'tracker' && (
             <div className="mx-auto max-w-[1280px] px-8 py-8">
               <Tracker
                 scenario={scenario}
+                scenarioArmed={scenarioArmed}
                 applicationNumber={applicationNumber}
-                live={trackerLive}
                 onOpen={onOpenApp}
                 onBack={onBackToList}
               />
             </div>
           )}
-          {screen === 'underwriter' && (
+          {!service && screen === 'underwriter' && (
             <div className="mx-auto max-w-[1280px] px-8 py-8">
               <Underwriter key={`${focusNumber ?? 'queue'}:${focusTick}`} onCount={onBankQueue} focusNumber={focusNumber} />
             </div>
@@ -173,7 +192,8 @@ function Overview({
                     scenario={scenario}
                     draft={starter}
                     applicationNumber={null}
-                    trackerLive
+                    scenarioArmed={false}
+                    service={null}
                     bankQueue={null}
                     clientCount={null}
                     focusNumber={null}
@@ -184,6 +204,7 @@ function Overview({
                     onOpenApp={noop}
                     onBackToList={noop}
                     onSubmitted={noop}
+                    onService={noop}
                     onRole={noop}
                     onScenario={noop}
                     go={noop}
@@ -206,7 +227,8 @@ export default function App() {
   const [overview, setOverview] = useState(false)
   const [draft, setDraft] = useState<LoanDraft>(starter)
   const [applicationNumber, setApplicationNumber] = useState<number | null>(null)
-  const [trackerLive, setTrackerLive] = useState(true)
+  const [scenarioArmed, setScenarioArmed] = useState(false)
+  const [service, setService] = useState<ServiceId | null>(null)
   const [bankQueue, setBankQueue] = useState<number | null>(null)
   const [clientCount, setClientCount] = useState<number | null>(null)
   const [focusNumber, setFocusNumber] = useState<number | null>(null)
@@ -227,6 +249,8 @@ export default function App() {
 
   const switchRole = (next: Role) => {
     setRole(next)
+    setService(null)
+    setScenarioArmed(false)
     setScreen(next === 'bank' ? 'underwriter' : 'dashboard')
   }
 
@@ -238,6 +262,8 @@ export default function App() {
         onOpen={(nextScreen, nextRole) => {
           setRole(nextRole)
           setScreen(nextScreen)
+          setService(null)
+          setScenarioArmed(false)
           setOverview(false)
         }}
       />
@@ -252,7 +278,8 @@ export default function App() {
       scenario={scenario}
       draft={draft}
       applicationNumber={applicationNumber}
-      trackerLive={trackerLive}
+      scenarioArmed={scenarioArmed}
+      service={service}
       bankQueue={bankQueue}
       clientCount={clientCount}
       focusNumber={focusNumber}
@@ -264,43 +291,53 @@ export default function App() {
         setScreen('wizard')
       }}
       onOpenApp={(number) => {
-        setTrackerLive(true)
+        setScenarioArmed(false)
+        setService(null)
         setApplicationNumber(number)
         setScreen('tracker')
       }}
       onBackToList={() => {
-        setTrackerLive(true)
+        setScenarioArmed(false)
+        setService(null)
         setApplicationNumber(null)
         setScreen('tracker')
       }}
       onSubmitted={(number) => {
-        setTrackerLive(true)
+        setScenarioArmed(false)
+        setService(null)
         setApplicationNumber(number)
         setScreen('tracker')
+      }}
+      onService={(id) => {
+        setService(id)
+        setScenarioArmed(false)
       }}
       onRole={switchRole}
       onScenario={(next) => {
         setScenario(next)
-        setTrackerLive(false)
+        setService(null)
         setApplicationNumber(null)
-        if (role === 'client') setScreen('tracker')
+        if (role === 'client') {
+          setScenarioArmed(true)
+          setScreen('tracker')
+        }
       }}
       go={(next) => {
-        if (next === 'tracker') {
-          setTrackerLive(true)
-          setApplicationNumber(null)
-        }
+        setService(null)
+        setScenarioArmed(false)
+        if (next === 'tracker') setApplicationNumber(null)
         setScreen(next)
       }}
       overview={overview}
       onOverview={() => setOverview(true)}
       onOpenNotice={(number) => {
+        setService(null)
+        setScenarioArmed(false)
         if (role === 'bank') {
           setFocusNumber(number)
           setFocusTick((tick) => tick + 1)
           setScreen('underwriter')
         } else {
-          setTrackerLive(true)
           setApplicationNumber(number)
           setScreen('tracker')
         }

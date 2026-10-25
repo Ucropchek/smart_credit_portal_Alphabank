@@ -2,10 +2,12 @@ import { useEffect, useRef, useState, type ReactNode } from 'react'
 import { listApplications, listStatus, type ApplicationListItem } from '../api/applications'
 import { cx } from './cx'
 import { Icon, type IconName } from './Icon'
+import { serviceMenu } from '../serviceMenu'
 
 export type Role = 'client' | 'bank'
 export type Screen = 'dashboard' | 'wizard' | 'tracker' | 'underwriter'
 export type Scenario = 'counter' | 'approved' | 'clarify'
+export type ServiceId = 'payments' | 'documents' | 'chat' | 'portfolio' | 'risks' | 'policy'
 
 const scenarios: { id: Scenario; label: string; hint: string }[] = [
   { id: 'counter', label: 'Встречное предложение', hint: 'Банк одобрил на других условиях' },
@@ -39,29 +41,22 @@ function AlfaMark({ size = 32 }: { size?: number }) {
 export function Sidebar({
   role,
   screen,
+  service,
   queueCount,
   applicationCount,
   onNavigate,
+  onService,
 }: {
   role: Role
   screen: Screen
+  service: ServiceId | null
   queueCount?: number | null
   applicationCount?: number | null
   onNavigate: (s: Screen) => void
+  onService: (id: ServiceId) => void
 }) {
   const nav = role === 'client' ? clientNav : bankNav
-  const secondary: { label: string; icon: IconName }[] =
-    role === 'client'
-      ? [
-          { label: 'Счета и платежи', icon: 'wallet' },
-          { label: 'Документы', icon: 'docs' },
-          { label: 'Чат с банком', icon: 'chat' },
-        ]
-      : [
-          { label: 'Портфель клиентов', icon: 'building' },
-          { label: 'Отчёты по рискам', icon: 'trendUp' },
-          { label: 'Политики скоринга', icon: 'shield' },
-        ]
+  const secondary = serviceMenu[role]
 
   return (
     <aside className="flex w-[248px] shrink-0 flex-col border-r border-line bg-white">
@@ -80,7 +75,7 @@ export function Sidebar({
           Кредитование
         </div>
         {nav.map((item) => {
-          const active = screen === item.id
+          const active = service == null && screen === item.id
           return (
             <button
               key={item.id}
@@ -112,15 +107,24 @@ export function Sidebar({
         <div className="mt-6 px-3 pb-2 text-[11px] font-semibold tracking-[0.08em] text-muted uppercase">
           Сервисы
         </div>
-        {secondary.map((item) => (
-          <div
-            key={item.label}
-            className="mb-0.5 flex h-11 items-center gap-3 rounded-xl px-3 text-sm font-medium text-muted"
-          >
-            <Icon name={item.icon} />
-            {item.label}
-          </div>
-        ))}
+        {secondary.map((item) => {
+          const active = service === item.id
+          return (
+            <button
+              key={item.id}
+              type="button"
+              onClick={() => onService(item.id)}
+              className={cx(
+                'relative mb-0.5 flex h-11 w-full cursor-pointer items-center gap-3 rounded-xl px-3 text-left text-sm font-medium transition-colors',
+                active ? 'bg-canvas text-ink' : 'text-muted hover:bg-canvas/60 hover:text-ink',
+              )}
+            >
+              {active && <span className="absolute top-1/2 left-0 h-5 w-[3px] -translate-y-1/2 rounded-r-full bg-alfa" />}
+              <Icon name={item.icon} className={active ? 'text-alfa' : ''} />
+              {item.label}
+            </button>
+          )
+        })}
       </nav>
 
       <div className="m-3 rounded-2xl border border-line p-4">
@@ -276,15 +280,23 @@ export function Header({
 
   useEffect(() => {
     let cancel = false
-    listApplications()
-      .then((list) => {
-        if (!cancel) setRows(list)
-      })
-      .catch(() => {
-        if (!cancel) setRows([])
-      })
+    let seen = false
+    const load = () => {
+      listApplications()
+        .then((list) => {
+          if (cancel) return
+          seen = true
+          setRows(list)
+        })
+        .catch(() => {
+          if (!cancel && !seen) setRows([])
+        })
+    }
+    load()
+    const timer = window.setInterval(load, 8000)
     return () => {
       cancel = true
+      window.clearInterval(timer)
     }
   }, [role, open])
   return (

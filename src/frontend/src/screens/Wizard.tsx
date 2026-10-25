@@ -5,10 +5,11 @@ import { lookupBusiness, mspProfile, registrationId, type BusinessCard, type Bki
 import { entrepreneurName, hasRegistryRecord, lookupCompany, type CompanyLookup } from '../api/companies'
 import { cx } from '../components/cx'
 import { annuity, months, rub } from '../format'
+import { preliminaryRate } from '../productRate'
 import { Icon } from '../components/Icon'
 import { Badge, Button, Card, CardHeader, Field, KV, Slider, inputCls } from '../components/ui'
 
-type Doc = { name: string; size: string; kind: string; state: 'ok' | 'checking' }
+type Doc = { name: string; kind: string }
 
 const required = ['Бухгалтерский баланс (ф. 1)', 'Отчёт о финансовых результатах (ф. 2)', 'Устав компании']
 
@@ -88,6 +89,14 @@ const roleName: Record<string, string> = {
 function ruDate(iso: string) {
   const [year, month, day] = iso.split('-')
   return day && month && year ? `${day}.${month}.${year}` : iso
+}
+
+function registryMoney(value: number | null | undefined) {
+  return typeof value === 'number' && Number.isFinite(value) && value >= 0 ? value : null
+}
+
+function registryCount(value: number | null | undefined) {
+  return typeof value === 'number' && Number.isInteger(value) && value >= 0 ? value : null
 }
 
 function roleLabel(whose: BkiObligation['whose']) {
@@ -195,6 +204,23 @@ function RegistryCard({
           />
         )}
         {profile && <KV k="Залог" v={profile.fedresurs.pledgeActive ? 'Есть действующий залог' : 'Нет'} />}
+        {profile && registryMoney(profile.fns.revenue) != null && (
+          <KV
+            k="Доходы по ФНС"
+            v={`${rub(registryMoney(profile.fns.revenue) ?? 0)}${profile.fns.revenueDate ? ` · ${ruDate(profile.fns.revenueDate)}` : ''}`}
+            mono
+          />
+        )}
+        {profile && registryMoney(profile.fns.expenses) != null && (
+          <KV k="Расходы по ФНС" v={rub(registryMoney(profile.fns.expenses) ?? 0)} mono />
+        )}
+        {profile && registryCount(profile.fns.employeeCount) != null && (
+          <KV
+            k="Численность по ФНС"
+            v={`${registryCount(profile.fns.employeeCount)}${profile.fns.employeeCountDate ? ` · ${ruDate(profile.fns.employeeCountDate)}` : ''}`}
+            mono
+          />
+        )}
         {profile && profile.fns.accountBlocked == null && <KV k="Блокировка счёта" v="Нет данных" />}
         {company.foundedOrganizations.map((organization) => (
           <KV
@@ -285,13 +311,10 @@ export function Wizard({ initial, onSubmit }: { initial: LoanDraft; onSubmit: (n
   const [termMonths, setTermMonths] = useState(initial.termMonths)
   const [inn, setInn] = useState('7701990013')
   const [lookup, setLookup] = useState<LookupState>({ status: 'idle' })
-  const [revenue, setRevenue] = useState('186 400 000')
-  const [debt, setDebt] = useState('22 500 000')
-  const [employees, setEmployees] = useState('84')
-  const [docs, setDocs] = useState<Doc[]>([
-    { name: 'Баланс_2025.pdf', size: '1,2 МБ', kind: required[0], state: 'ok' },
-    { name: 'ОФР_2025.pdf', size: '860 КБ', kind: required[1], state: 'ok' },
-  ])
+  const [revenue, setRevenue] = useState('')
+  const [debt, setDebt] = useState('')
+  const [employees, setEmployees] = useState('')
+  const [docs, setDocs] = useState<Doc[]>([])
   const [drag, setDrag] = useState(false)
   const [sending, setSending] = useState(false)
   const [submitError, setSubmitError] = useState<string | null>(null)
@@ -320,6 +343,8 @@ export function Wizard({ initial, onSubmit }: { initial: LoanDraft; onSubmit: (n
     const digits = inn.replace(/\D/g, '')
     if (digits.length < 10) return
     setLookup({ status: 'loading' })
+    setRevenue('')
+    setEmployees('')
     try {
       const company = await lookupCompany(digits)
       if (!hasRegistryRecord(company)) {
@@ -337,47 +362,60 @@ export function Wizard({ initial, onSubmit }: { initial: LoanDraft; onSubmit: (n
         }
       }
       setLookup({ status: 'ready', company, profile, profileFailed })
+      const revenueFromRegistry = registryMoney(profile?.fns.revenue)
+      if (revenueFromRegistry != null) setRevenue(numFmt(String(Math.round(revenueFromRegistry))))
+      const staff = registryCount(profile?.fns.employeeCount) ?? registryCount(profile ? mspProfile(profile)?.headcount : null)
+      if (staff != null) setEmployees(String(staff))
     } catch {
       setLookup({ status: 'error' })
     }
   }
 
   const addFiles = (files: FileList | null) => {
-    const list = files && files.length ? Array.from(files).map((file) => file.name) : ['Устав_ООО_Вектор.pdf']
-    list.forEach((name, index) => {
-      const kind = required.find((item) => !docs.some((doc) => doc.kind === item)) ?? 'Дополнительный документ'
-      const doc: Doc = { name, size: '640 КБ', kind, state: 'checking' }
-      setDocs((current) => [...current, doc])
-      setTimeout(
-        () => setDocs((current) => current.map((item) => (item === doc ? { ...item, state: 'ok' } : item))),
-        900 + index * 300,
-      )
+    if (!files?.length) return
+    setDocs((current) => {
+      const next = [...current]
+      for (const file of Array.from(files)) {
+        const kind = required.find((item) => !next.some((doc) => doc.kind === item)) ?? 'Дополнительный документ'
+        next.push({ name: file.name, kind })
+      }
+      return next
     })
   }
 
   const attachSamples = () => {
-    const missing = required.filter((item) => !docs.some((doc) => doc.kind === item))
-    const added: Doc[] = missing.map((kind) => ({ name: `${kind}.pdf`, size: '640 КБ', kind, state: 'checking' }))
-    if (!added.length) return
-    setDocs((current) => [...current, ...added])
-    added.forEach((doc, index) => {
-      setTimeout(
-        () => setDocs((current) => current.map((item) => (item.kind === doc.kind ? { ...item, state: 'ok' } : item))),
-        400 + index * 200,
-      )
+    setDocs((current) => {
+      const missing = required.filter((item) => !current.some((doc) => doc.kind === item))
+      if (!missing.length) return current
+      return [...current, ...missing.map((kind) => ({ name: `${kind}.pdf`, kind }))]
     })
   }
 
   const step1 = lookup.status === 'ready'
-  const step2 = step1 && revenue.length > 0 && debt.length > 0
-  const step3 = step2 && required.every((item) => docs.some((doc) => doc.kind === item && doc.state === 'ok'))
+  const step2 = step1 && revenue.length > 0
+  const step3 = step2 && required.every((item) => docs.some((doc) => doc.kind === item))
   const step = !step1 ? 1 : !step2 ? 2 : !step3 ? 3 : 4
   const revenueValue = Number(revenue.replace(/\D/g, '')) || 0
   const debtValue = Number(debt.replace(/\D/g, '')) || 0
   const load = revenueValue ? Math.round(((debtValue + amount) / revenueValue) * 100) : 0
   const foundId = lookup.status === 'ready' ? registrationId(lookup.company) : null
   const purposeReady = purpose.trim().length > 0
-  const payment = annuity(amount, 19.9, termMonths)
+  const rate = preliminaryRate(purpose, amount, termMonths)
+  const payment = rate == null ? null : annuity(amount, rate, termMonths)
+  const profile = lookup.status === 'ready' ? lookup.profile : null
+  const registryRevenue = registryMoney(profile?.fns.revenue)
+  const registryStaff = registryCount(profile?.fns.employeeCount)
+  const mspStaff = registryCount(profile ? mspProfile(profile)?.headcount : null)
+  const revenueHint =
+    registryRevenue != null
+      ? `ФНС, доходы${profile?.fns.revenueDate ? ` на ${ruDate(profile.fns.revenueDate)}` : ''}`
+      : 'Эту цифру указывает клиент'
+  const staffHint =
+    registryStaff != null
+      ? `ФНС, численность${profile?.fns.employeeCountDate ? ` на ${ruDate(profile.fns.employeeCountDate)}` : ''}`
+      : mspStaff != null
+        ? 'Реестр МСП'
+        : 'Эту цифру указывает клиент'
 
   const send = async () => {
     if (!foundId || !purposeReady) return
@@ -386,7 +424,7 @@ export function Wizard({ initial, onSubmit }: { initial: LoanDraft; onSubmit: (n
     try {
       const revenueDigits = revenue.replace(/\D/g, '')
       const debtDigits = debt.replace(/\D/g, '')
-      const marked = docs.filter((doc) => doc.state === 'ok').map((doc) => ({ name: doc.name, kind: doc.kind }))
+      const marked = docs.map((doc) => ({ name: doc.name, kind: doc.kind }))
       const created = await createApplication({
         purpose: purpose.trim(),
         amount,
@@ -415,10 +453,6 @@ export function Wizard({ initial, onSubmit }: { initial: LoanDraft; onSubmit: (n
           </p>
           <h1 className="mt-1 text-[32px] font-semibold tracking-[-0.025em] text-ink">Подача заявки</h1>
         </div>
-        <span className="flex items-center gap-2 text-sm text-muted">
-          <Icon name="clock" size={16} />
-          Черновик сохранён автоматически
-        </span>
       </div>
 
       <Stepper step={step} />
@@ -523,15 +557,15 @@ export function Wizard({ initial, onSubmit }: { initial: LoanDraft; onSubmit: (n
           </Card>
 
           <Card className="p-8">
-            <CardHeader title="2. Параметры и финансы" subtitle="Показатели за последние 12 месяцев" />
+            <CardHeader title="2. Параметры и финансы" subtitle="Доходы и численность подставляются из ФНС, если карточка их содержит" />
             <div className="mt-6 grid grid-cols-3 gap-5">
-              <Field label="Годовая выручка, ₽" hint="По данным ФНС: 181,2 млн ₽">
+              <Field label="Годовая выручка, ₽" hint={revenueHint}>
                 <input className={inputCls} value={revenue} onChange={(event) => setRevenue(numFmt(event.target.value))} />
               </Field>
-              <Field label="Текущие обязательства, ₽" hint="Кредиты и лизинг в других банках">
+              <Field label="Текущие обязательства, ₽" hint="Указывает клиент. В реестре этой суммы нет">
                 <input className={inputCls} value={debt} onChange={(event) => setDebt(numFmt(event.target.value))} />
               </Field>
-              <Field label="Сотрудников" hint="Среднесписочная численность">
+              <Field label="Сотрудников" hint={staffHint}>
                 <input
                   className={inputCls}
                   value={employees}
@@ -553,7 +587,7 @@ export function Wizard({ initial, onSubmit }: { initial: LoanDraft; onSubmit: (n
           <Card className="p-8">
             <CardHeader
               title="3. Документы"
-              subtitle="PDF, JPG или XLSX до 20 МБ. Проверяем формат и подписи автоматически"
+              subtitle="В заявку попадёт только название. Содержимое файла не отправляется и не проверяется"
             />
             <div
               onDragOver={(event) => {
@@ -587,7 +621,7 @@ export function Wizard({ initial, onSubmit }: { initial: LoanDraft; onSubmit: (n
                   attachSamples()
                 }}
               >
-                Приложить примеры
+                Подставить примеры названий
               </button>
               <input
                 ref={fileRef}
@@ -606,25 +640,33 @@ export function Wizard({ initial, onSubmit }: { initial: LoanDraft; onSubmit: (n
                     <span
                       className={cx(
                         'grid size-8 place-items-center rounded-lg',
-                        doc?.state === 'ok' ? 'bg-ok-soft text-ok' : doc ? 'bg-info-soft text-info' : 'bg-canvas text-muted',
+                        doc ? 'bg-ok-soft text-ok' : 'bg-canvas text-muted',
                       )}
                     >
-                      {doc?.state === 'checking' ? (
-                        <span className="size-3.5 animate-spin rounded-full border-2 border-info/30 border-t-info" />
-                      ) : (
-                        <Icon name={doc ? 'check' : 'file'} size={16} strokeWidth={doc ? 2.5 : 1.75} />
-                      )}
+                      <Icon name={doc ? 'check' : 'file'} size={16} strokeWidth={doc ? 2.5 : 1.75} />
                     </span>
                     <div className="min-w-0 flex-1">
                       <div className="text-sm font-medium text-ink">{item}</div>
-                      <div className="text-xs text-muted">{doc ? `${doc.name} · ${doc.size}` : 'Не загружен'}</div>
+                      <div className="truncate text-xs text-muted">{doc ? doc.name : 'Название не указано'}</div>
                     </div>
-                    {doc?.state === 'ok' && <Badge tone="ok">Проверен</Badge>}
-                    {doc?.state === 'checking' && <Badge tone="info">Проверка…</Badge>}
-                    {!doc && <Badge tone="warn">Требуется</Badge>}
+                    {doc ? <Badge tone="neutral">Название</Badge> : <Badge tone="warn">Нужно</Badge>}
                   </li>
                 )
               })}
+              {docs
+                .filter((doc) => !required.includes(doc.kind))
+                .map((doc) => (
+                  <li key={`${doc.kind}:${doc.name}`} className="flex items-center gap-4 px-5 py-3.5">
+                    <span className="grid size-8 place-items-center rounded-lg bg-ok-soft text-ok">
+                      <Icon name="check" size={16} strokeWidth={2.5} />
+                    </span>
+                    <div className="min-w-0 flex-1">
+                      <div className="text-sm font-medium text-ink">{doc.kind}</div>
+                      <div className="truncate text-xs text-muted">{doc.name}</div>
+                    </div>
+                    <Badge tone="neutral">Название</Badge>
+                  </li>
+                ))}
             </ul>
           </Card>
         </div>
@@ -659,15 +701,16 @@ export function Wizard({ initial, onSubmit }: { initial: LoanDraft; onSubmit: (n
                 />
               </div>
               <dl className="mt-5 space-y-3 text-sm">
-                <div className="flex justify-between">
-                  <dt className="text-muted">Ставка</dt>
-                  <dd className="tnum font-medium text-ink">от 19,9%</dd>
+                <div className="flex justify-between gap-4">
+                  <dt className="text-muted">Предварительная ставка</dt>
+                  <dd className="tnum font-medium text-ink">{rate == null ? 'Нет для этой цели' : `от ${rate.toLocaleString('ru-RU')}%`}</dd>
                 </div>
                 <div className="flex justify-between">
                   <dt className="text-muted">Платёж</dt>
-                  <dd className="tnum font-medium text-ink">≈ {rub(payment)}/мес</dd>
+                  <dd className="tnum font-medium text-ink">{payment == null ? '—' : `≈ ${rub(payment)}/мес`}</dd>
                 </div>
               </dl>
+              <p className="mt-3 text-xs text-muted">Та же предварительная ставка продукта, что в решении банка. Балл её не считает.</p>
               <div className="mt-6 border-t border-line pt-5">
                 <div className="flex justify-between text-sm">
                   <span className="text-muted">Готовность заявки</span>
@@ -702,10 +745,13 @@ export function Wizard({ initial, onSubmit }: { initial: LoanDraft; onSubmit: (n
                 <p className="mt-3 text-center text-xs text-muted">В реестре нет ОГРН или ОГРНИП, заявку отправить нельзя</p>
               )}
               {!submitError && (!step3 || !foundId) && purposeReady && lookup.status !== 'ready' && (
-                <p className="mt-3 text-center text-xs text-muted">Найдите компанию и загрузите все обязательные документы</p>
+                <p className="mt-3 text-center text-xs text-muted">Найдите компанию и укажите названия обязательных документов</p>
               )}
-              {!submitError && purposeReady && foundId && !step3 && (
-                <p className="mt-3 text-center text-xs text-muted">Загрузите все обязательные документы</p>
+              {!submitError && purposeReady && foundId && !step2 && (
+                <p className="mt-3 text-center text-xs text-muted">Укажите годовую выручку</p>
+              )}
+              {!submitError && purposeReady && foundId && step2 && !step3 && (
+                <p className="mt-3 text-center text-xs text-muted">Укажите названия обязательных документов</p>
               )}
             </Card>
             <div className="flex gap-3 rounded-2xl border border-line bg-white p-5 text-sm">
