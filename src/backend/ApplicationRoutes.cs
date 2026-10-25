@@ -318,7 +318,12 @@ static class ApplicationRoutes
 
         var total = ReadTotal(score.Body);
         var offer = ProductOffer.Build(score.InMsp, score.CategoryCode, total, form.Amount, form.TermMonths);
-        var scoreJson = JsonSerializer.Serialize(score.Body, Json);
+        var statementConsent = await ReadStatementConsentAsync(dataSource, number);
+        var turnover = statementConsent == true ? await TurnoverAsync(dataSource, number) : [];
+        var scoreNode = JsonNode.Parse(JsonSerializer.Serialize(score.Body, Json));
+        if (scoreNode is not null)
+            ApplyStatementDetail(scoreNode, StatementScoreDetail(statementConsent, turnover));
+        var scoreJson = scoreNode?.ToJsonString(Json) ?? JsonSerializer.Serialize(score.Body, Json);
 
         await using (var command = dataSource.CreateCommand(
             """
@@ -470,6 +475,8 @@ static class ApplicationRoutes
         var turnover = statementConsent == true ? await TurnoverAsync(dataSource, number) : [];
 
         JsonNode? score = scoreJson is null ? null : JsonNode.Parse(scoreJson);
+        if (score is not null)
+            ApplyStatementDetail(score, StatementScoreDetail(statementConsent, turnover));
         var hideStops = clientView
             && employeeDecision == "reject"
             && string.IsNullOrEmpty(employeeReason);
@@ -663,9 +670,47 @@ static class ApplicationRoutes
         return rows;
     }
 
-    static async Task<List<object>> TurnoverAsync(NpgsqlDataSource dataSource, long number)
+    static async Task<bool?> ReadStatementConsentAsync(NpgsqlDataSource dataSource, long number)
     {
-        var rows = new List<object>();
+        await using var command = dataSource.CreateCommand(
+            "select statement_consent from portal.applications where id = @id");
+        command.Parameters.AddWithValue("id", number);
+        var value = await command.ExecuteScalarAsync();
+        return value is bool consent ? consent : null;
+    }
+
+    static string StatementScoreDetail(bool? consent, IReadOnlyList<TurnoverMonth> months)
+    {
+        if (consent == true && months.Count > 0)
+        {
+            var incoming = months.Sum(month => month.Incoming);
+            var outgoing = months.Sum(month => month.Outgoing);
+            return $"Поступления {Money(incoming)}, списания {Money(outgoing)} за {months.Count} мес. Балл 0.";
+        }
+
+        if (consent == false)
+            return "Клиент отказался передавать выписку. Балл 0.";
+        return "Выписки нет. Балл 0.";
+    }
+
+    static string Money(decimal value) => value.ToString(CultureInfo.InvariantCulture);
+
+    static void ApplyStatementDetail(JsonNode score, string detail)
+    {
+        if (score["points"] is not JsonArray points)
+            return;
+        foreach (var item in points)
+        {
+            if (item?["factor"]?.GetValue<string>() == "statement")
+                item["detail"] = detail;
+        }
+    }
+
+    sealed record TurnoverMonth(string Month, decimal Incoming, decimal Outgoing);
+
+    static async Task<List<TurnoverMonth>> TurnoverAsync(NpgsqlDataSource dataSource, long number)
+    {
+        var rows = new List<TurnoverMonth>();
         await using var command = dataSource.CreateCommand(
             """
             select month, incoming, outgoing
@@ -677,12 +722,10 @@ static class ApplicationRoutes
         await using var reader = await command.ExecuteReaderAsync();
         while (await reader.ReadAsync())
         {
-            rows.Add(new
-            {
-                month = reader.GetFieldValue<DateOnly>(0).ToString("yyyy-MM", CultureInfo.InvariantCulture),
-                incoming = reader.GetDecimal(1),
-                outgoing = reader.GetDecimal(2)
-            });
+            rows.Add(new TurnoverMonth(
+                reader.GetFieldValue<DateOnly>(0).ToString("yyyy-MM", CultureInfo.InvariantCulture),
+                reader.GetDecimal(1),
+                reader.GetDecimal(2)));
         }
         return rows;
     }
