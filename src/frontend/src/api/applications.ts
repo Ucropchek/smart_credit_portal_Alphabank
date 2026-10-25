@@ -92,6 +92,11 @@ export type ApplicationDetail = {
   requests?: InformationRequest[]
   registries?: RegistrySnapshot
   statement?: AccountStatement
+  finances?: {
+    annualRevenue: number | null
+    obligations: number | null
+    employees: number | null
+  }
   purposeCategory?: {
     matches?: PurposeMatch[]
   } | null
@@ -195,7 +200,13 @@ export type RegistrySnapshot = {
 }
 
 export async function createApplication(
-  draft: LoanDraft & { inn: string; registrationId: string },
+  draft: LoanDraft & {
+    inn: string
+    registrationId: string
+    annualRevenue?: number
+    obligations?: number
+    employees?: number
+  },
 ): Promise<CreatedApplication> {
   const response = await fetch('/applications', {
     method: 'POST',

@@ -417,7 +417,8 @@ static class ApplicationRoutes
                    counter_amount, counter_term_months, counter_product_code,
                    employee_decision, employee_reason, employee_decided_at,
                    statement_consent,
-                   purpose_category::text, purpose_handoff_ok, purpose_handoff_error
+                   purpose_category::text, purpose_handoff_ok, purpose_handoff_error,
+                   annual_revenue, obligations, employees
             from portal.applications
             where id = @id
             """);
@@ -457,6 +458,9 @@ static class ApplicationRoutes
         var purposeCategory = NullableText(reader, 29);
         bool? handoffOk = reader.IsDBNull(30) ? null : reader.GetBoolean(30);
         var handoffError = NullableText(reader, 31);
+        decimal? annualRevenue = reader.IsDBNull(32) ? null : reader.GetDecimal(32);
+        decimal? obligations = reader.IsDBNull(33) ? null : reader.GetDecimal(33);
+        int? employees = reader.IsDBNull(34) ? null : reader.GetInt32(34);
         await reader.CloseAsync();
 
         var names = await BusinessNamesAsync(dataSource, [registrationId]);
@@ -553,6 +557,16 @@ static class ApplicationRoutes
                 outcome = employeeDecision,
                 reason = employeeReason,
                 decidedAt = employeeDecidedAt
+            };
+        }
+
+        if (annualRevenue is not null || obligations is not null || employees is not null)
+        {
+            detail["finances"] = new
+            {
+                annualRevenue,
+                obligations,
+                employees
             };
         }
 

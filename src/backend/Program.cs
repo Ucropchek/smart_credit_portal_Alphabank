@@ -1138,6 +1138,12 @@ app.MapPost("/applications", async (ApplicationRequest? request, NpgsqlDataSourc
         problems.Add("inn must be 10 or 12 digits");
     if (registrationId is null || registrationId.Length is not (13 or 15) || !registrationId.All(char.IsAsciiDigit))
         problems.Add("registrationId must be a 13-digit OGRN or a 15-digit OGRNIP");
+    if (request.AnnualRevenue is { } revenue && !IsDeclaredMoney(revenue))
+        problems.Add("annualRevenue must be a non-negative number of roubles with at most 2 decimal places");
+    if (request.Obligations is { } obligations && !IsDeclaredMoney(obligations))
+        problems.Add("obligations must be a non-negative number of roubles with at most 2 decimal places");
+    if (request.Employees is < 0 or > 1_000_000)
+        problems.Add("employees must be a whole number from 0 to 1000000");
     if (problems.Count > 0)
         return Results.BadRequest(new { error = string.Join("; ", problems) });
 
@@ -1145,8 +1151,10 @@ app.MapPost("/applications", async (ApplicationRequest? request, NpgsqlDataSourc
 
     await using var command = dataSource.CreateCommand(
         """
-        insert into portal.applications (purpose, amount, term_months, inn, registration_id)
-        values (@purpose, @amount, @termMonths, @inn, @registrationId)
+        insert into portal.applications (
+            purpose, amount, term_months, inn, registration_id, annual_revenue, obligations, employees)
+        values (
+            @purpose, @amount, @termMonths, @inn, @registrationId, @annualRevenue, @obligations, @employees)
         returning id, step, submitted_at
         """);
     command.Parameters.AddWithValue("purpose", purpose!);
@@ -1154,6 +1162,9 @@ app.MapPost("/applications", async (ApplicationRequest? request, NpgsqlDataSourc
     command.Parameters.AddWithValue("termMonths", request.TermMonths!.Value);
     command.Parameters.AddWithValue("inn", inn!);
     command.Parameters.AddWithValue("registrationId", registrationId!);
+    command.Parameters.Add(new NpgsqlParameter("annualRevenue", NpgsqlDbType.Numeric) { Value = (object?)request.AnnualRevenue ?? DBNull.Value });
+    command.Parameters.Add(new NpgsqlParameter("obligations", NpgsqlDbType.Numeric) { Value = (object?)request.Obligations ?? DBNull.Value });
+    command.Parameters.Add(new NpgsqlParameter("employees", NpgsqlDbType.Integer) { Value = (object?)request.Employees ?? DBNull.Value });
     await using var reader = await command.ExecuteReaderAsync();
     await reader.ReadAsync();
 
@@ -1179,6 +1190,9 @@ app.MapPost("/applications", async (ApplicationRequest? request, NpgsqlDataSourc
 ApplicationRoutes.Map(app);
 
 app.Run();
+
+static bool IsDeclaredMoney(decimal value) =>
+    value >= 0 && value == decimal.Round(value, 2) && value < 10_000_000_000_000m;
 
 // Last BKI checkbox event of every open /bki-consent connection. Checked is null until the first click.
 sealed class BkiConsentStore
@@ -1252,7 +1266,15 @@ sealed class BkiConsentStore
 
 sealed record BkiConsentState(bool? Checked, DateTimeOffset? ChangedAt, DateTimeOffset OpenedAt);
 
-sealed record ApplicationRequest(string? Purpose, decimal? Amount, int? TermMonths, string? Inn, string? RegistrationId);
+sealed record ApplicationRequest(
+    string? Purpose,
+    decimal? Amount,
+    int? TermMonths,
+    string? Inn,
+    string? RegistrationId,
+    decimal? AnnualRevenue = null,
+    decimal? Obligations = null,
+    int? Employees = null);
 
 // Tracking steps the client sees. Titles match the tracker screen.
 static class ApplicationSteps
@@ -1337,7 +1359,23 @@ sealed class PortalSchema(NpgsqlDataSource dataSource)
                     add column if not exists statement_consent boolean,
                     add column if not exists purpose_category jsonb,
                     add column if not exists purpose_handoff_ok boolean,
-                    add column if not exists purpose_handoff_error text;
+                    add column if not exists purpose_handoff_error text,
+                    add column if not exists annual_revenue numeric(15, 2),
+                    add column if not exists obligations numeric(15, 2),
+                    add column if not exists employees integer;
+
+                alter table portal.applications drop constraint if exists ck_applications_annual_revenue;
+                alter table portal.applications
+                    add constraint ck_applications_annual_revenue
+                    check (annual_revenue is null or annual_revenue >= 0);
+                alter table portal.applications drop constraint if exists ck_applications_obligations;
+                alter table portal.applications
+                    add constraint ck_applications_obligations
+                    check (obligations is null or obligations >= 0);
+                alter table portal.applications drop constraint if exists ck_applications_employees;
+                alter table portal.applications
+                    add constraint ck_applications_employees
+                    check (employees is null or employees >= 0);
 
                 alter table portal.applications
                     drop constraint if exists ck_applications_employee_decision;

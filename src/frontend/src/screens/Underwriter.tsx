@@ -14,6 +14,7 @@ import {
   type RegistrySnapshot,
 } from '../api/applications'
 import { cx } from '../components/cx'
+import { FinancesCard } from '../components/FinancesCard'
 import { Badge, Button, Card, CardHeader, KV } from '../components/ui'
 import { monthLabel, months, rub } from '../format'
 
@@ -456,6 +457,14 @@ export function Underwriter({ onCount }: { onCount?: (count: number) => void }) 
                   />
                 </div>
               </Card>
+
+              {detail.finances && (
+                <FinancesCard
+                  finances={detail.finances}
+                  amount={detail.amount}
+                  subtitle="Клиент указал их при подаче. Реестр эти цифры не подтверждал"
+                />
+              )}
 
               <PurposeFacts detail={detail} />
 

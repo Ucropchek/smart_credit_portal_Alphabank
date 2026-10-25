@@ -384,12 +384,17 @@ export function Wizard({ initial, onSubmit }: { initial: LoanDraft; onSubmit: (n
     setSending(true)
     setSubmitError(null)
     try {
+      const revenueDigits = revenue.replace(/\D/g, '')
+      const debtDigits = debt.replace(/\D/g, '')
       const created = await createApplication({
         purpose: purpose.trim(),
         amount,
         termMonths,
         inn: inn.replace(/\D/g, ''),
         registrationId: foundId,
+        ...(revenueDigits ? { annualRevenue: Number(revenueDigits) } : {}),
+        ...(debtDigits ? { obligations: Number(debtDigits) } : {}),
+        ...(/^\d+$/.test(employees) ? { employees: Number(employees) } : {}),
       })
       onSubmit(created.number)
     } catch (error) {

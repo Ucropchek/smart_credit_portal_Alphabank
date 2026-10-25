@@ -1,5 +1,5 @@
 import { useEffect, useRef, useState } from 'react'
-import type { LoanDraft } from './api/applications'
+import { listApplications, type LoanDraft } from './api/applications'
 import { Header, Sidebar, type Role, type Scenario, type Screen } from './components/Shell'
 import { Dashboard } from './screens/Dashboard'
 import { Tracker } from './screens/Tracker'
@@ -186,6 +186,19 @@ export default function App() {
   const [applicationNumber, setApplicationNumber] = useState<number | null>(null)
   const [bankQueue, setBankQueue] = useState<number | null>(null)
   const [clientCount, setClientCount] = useState<number | null>(null)
+
+  useEffect(() => {
+    if (applicationNumber == null) return
+    let cancel = false
+    listApplications()
+      .then((rows) => {
+        if (!cancel) setClientCount(rows.length)
+      })
+      .catch(() => {})
+    return () => {
+      cancel = true
+    }
+  }, [applicationNumber])
 
   const switchRole = (next: Role) => {
     setRole(next)

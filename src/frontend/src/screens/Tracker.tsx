@@ -1,6 +1,7 @@
 import { useEffect, useState } from 'react'
 import { answerApplication, getApplication, purposeMatches, saveStatement, type ApplicationDetail } from '../api/applications'
 import { cx } from '../components/cx'
+import { FinancesCard } from '../components/FinancesCard'
 import { Icon } from '../components/Icon'
 import type { Scenario } from '../components/Shell'
 import { Badge, Button, Card, CardHeader } from '../components/ui'
@@ -215,6 +216,14 @@ function LiveApplication({ number }: { number: number }) {
               })}
             </div>
           </Card>
+
+          {detail.finances && (
+            <FinancesCard
+              finances={detail.finances}
+              amount={detail.amount}
+              subtitle="Цифры, которые вы указали при подаче"
+            />
+          )}
 
           <StatementCard
             statement={detail.statement}
