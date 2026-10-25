@@ -3,6 +3,7 @@ import type { LoanDraft } from './api/applications'
 import { Header, Sidebar, type Role, type Scenario, type Screen } from './components/Shell'
 import { Dashboard } from './screens/Dashboard'
 import { Tracker } from './screens/Tracker'
+import { Underwriter } from './screens/Underwriter'
 import { Wizard } from './screens/Wizard'
 
 const titles: Record<Screen, string> = {
@@ -31,6 +32,8 @@ function AppFrame({
   scenario,
   draft,
   applicationNumber,
+  bankQueue,
+  onBankQueue,
   onApply,
   onOpenApp,
   onSubmitted,
@@ -46,6 +49,8 @@ function AppFrame({
   scenario: Scenario
   draft: LoanDraft
   applicationNumber: number | null
+  bankQueue: number | null
+  onBankQueue: (count: number) => void
   onApply: (draft: LoanDraft) => void
   onOpenApp: (number: number) => void
   onSubmitted: (number: number) => void
@@ -64,7 +69,7 @@ function AppFrame({
 
   return (
     <div className={fill ? 'flex h-screen' : 'flex min-h-[960px]'}>
-      <Sidebar role={role} screen={screen} onNavigate={go} />
+      <Sidebar role={role} screen={screen} queueCount={bankQueue} onNavigate={go} />
       <div className="flex min-w-0 flex-1 flex-col">
         <Header
           role={role}
@@ -89,6 +94,11 @@ function AppFrame({
           {screen === 'tracker' && (
             <div className="mx-auto max-w-[1280px] px-8 py-8">
               <Tracker scenario={scenario} applicationNumber={applicationNumber} />
+            </div>
+          )}
+          {screen === 'underwriter' && (
+            <div className="mx-auto max-w-[1280px] px-8 py-8">
+              <Underwriter onCount={onBankQueue} />
             </div>
           )}
         </main>
@@ -142,6 +152,8 @@ function Overview({
                     scenario={scenario}
                     draft={starter}
                     applicationNumber={null}
+                    bankQueue={null}
+                    onBankQueue={noop}
                     onApply={noop}
                     onOpenApp={noop}
                     onSubmitted={noop}
@@ -166,6 +178,7 @@ export default function App() {
   const [overview, setOverview] = useState(false)
   const [draft, setDraft] = useState<LoanDraft>(starter)
   const [applicationNumber, setApplicationNumber] = useState<number | null>(null)
+  const [bankQueue, setBankQueue] = useState<number | null>(null)
 
   const switchRole = (next: Role) => {
     setRole(next)
@@ -194,6 +207,8 @@ export default function App() {
       scenario={scenario}
       draft={draft}
       applicationNumber={applicationNumber}
+      bankQueue={bankQueue}
+      onBankQueue={setBankQueue}
       onApply={(next) => {
         setDraft(next)
         setScreen('wizard')

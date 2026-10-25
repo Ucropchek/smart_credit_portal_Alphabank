@@ -38,10 +38,12 @@ function AlfaMark({ size = 32 }: { size?: number }) {
 export function Sidebar({
   role,
   screen,
+  queueCount,
   onNavigate,
 }: {
   role: Role
   screen: Screen
+  queueCount?: number | null
   onNavigate: (s: Screen) => void
 }) {
   const nav = role === 'client' ? clientNav : bankNav
@@ -96,9 +98,9 @@ export function Sidebar({
                   1
                 </span>
               )}
-              {item.id === 'underwriter' && (
+              {item.id === 'underwriter' && queueCount != null && (
                 <span className="tnum ml-auto rounded-md bg-canvas px-1.5 py-0.5 text-[11px] font-semibold text-muted">
-                  14
+                  {queueCount}
                 </span>
               )}
             </button>

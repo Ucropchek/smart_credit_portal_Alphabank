@@ -22,6 +22,44 @@ export type ApplicationListItem = {
   stepTitle: string
 }
 
+export type ScorePoint = {
+  factor: string
+  title: string
+  points: number
+  detail: string
+}
+
+export type ApplicationScore = {
+  total: number
+  decision: string
+  reason: string
+  stops?: {
+    liquidated?: boolean
+    overdue?: boolean
+    accountBlocked?: boolean
+    fired?: string[]
+  }
+  points?: ScorePoint[]
+  model?: {
+    name?: string
+    alfaCoefficients?: boolean
+  }
+}
+
+export type ApplicationProduct = {
+  code: string
+  maxAmount: number
+  subsidizedAvailable: boolean
+  mspCategory: string | null
+  ordinaryMaxAmount: number
+}
+
+export type CounterOffer = {
+  amount: number
+  termMonths: number
+  product: string
+}
+
 export type ApplicationDetail = {
   number: number
   purpose: string
@@ -38,6 +76,13 @@ export type ApplicationDetail = {
     inn: string
     name: string | null
   }
+  bkiConsent?: {
+    checked: boolean | null
+    changedAt: string | null
+  }
+  score?: ApplicationScore
+  product?: ApplicationProduct
+  counterOffer?: CounterOffer
 }
 
 export async function createApplication(
@@ -65,11 +110,25 @@ export async function listApplications(): Promise<ApplicationListItem[]> {
   return body.filter(isListItem)
 }
 
-export async function getApplication(number: number): Promise<ApplicationDetail> {
-  const response = await fetch(`/applications/${number}?view=client`, { signal: AbortSignal.timeout(8000) })
+export async function getApplication(number: number, view: 'client' | 'bank' = 'client'): Promise<ApplicationDetail> {
+  const query = view === 'client' ? '?view=client' : ''
+  const response = await fetch(`/applications/${number}${query}`, { signal: AbortSignal.timeout(8000) })
   if (!response.ok) throw new Error('application request failed')
   const body: unknown = await response.json()
   if (!isDetail(body)) throw new Error('application response is invalid')
+  return body
+}
+
+export async function scoreApplication(number: number): Promise<ApplicationDetail> {
+  const response = await fetch(`/applications/${number}/score`, {
+    method: 'POST',
+    signal: AbortSignal.timeout(12000),
+  })
+  const body: unknown = await response.json().catch(() => null)
+  if (!response.ok || !isDetail(body)) {
+    const message = body && typeof body === 'object' && 'error' in body && typeof body.error === 'string' ? body.error : 'Не удалось посчитать скоринг'
+    throw new Error(message)
+  }
   return body
 }
 
