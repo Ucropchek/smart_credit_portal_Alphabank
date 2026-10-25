@@ -20,6 +20,7 @@ export type ApplicationListItem = {
   termMonths: number
   step: string
   stepTitle: string
+  employeeDecision?: string | null
 }
 
 export type ScorePoint = {
@@ -125,6 +126,16 @@ export async function matchPurpose(purpose: string): Promise<PurposeMatch[]> {
     throw new Error(message)
   }
   return purposeMatches(body as ApplicationDetail['purposeCategory'])
+}
+
+export function listStatus(decision: string | null | undefined, stepTitle: string): {
+  label: string
+  tone: 'ok' | 'warn' | 'danger' | 'info'
+} {
+  if (decision === 'approve') return { label: 'Одобрено', tone: 'ok' }
+  if (decision === 'review') return { label: 'На разборе', tone: 'warn' }
+  if (decision === 'reject') return { label: 'Отказ', tone: 'danger' }
+  return { label: stepTitle, tone: 'info' }
 }
 
 export type TurnoverMonth = {

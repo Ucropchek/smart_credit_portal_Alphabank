@@ -44,10 +44,10 @@ static class ApplicationRoutes
     static async Task<IResult> ListAsync(NpgsqlDataSource dataSource, PortalSchema portal)
     {
         await portal.EnsureAsync();
-        var rows = new List<(long Number, decimal Amount, int TermMonths, string RegistrationId, string Step)>();
+        var rows = new List<(long Number, decimal Amount, int TermMonths, string RegistrationId, string Step, string? Decision)>();
         await using (var command = dataSource.CreateCommand(
             """
-            select id, amount, term_months, registration_id, step
+            select id, amount, term_months, registration_id, step, employee_decision
             from portal.applications
             order by id
             """))
@@ -60,7 +60,8 @@ static class ApplicationRoutes
                     reader.GetDecimal(1),
                     reader.GetInt32(2),
                     reader.GetString(3),
-                    reader.GetString(4)));
+                    reader.GetString(4),
+                    reader.IsDBNull(5) ? null : reader.GetString(5)));
             }
         }
 
@@ -75,7 +76,8 @@ static class ApplicationRoutes
                 amount = row.Amount,
                 termMonths = row.TermMonths,
                 step = row.Step,
-                stepTitle = ApplicationSteps.Title(row.Step)
+                stepTitle = ApplicationSteps.Title(row.Step),
+                employeeDecision = row.Decision
             };
         });
         return Results.Ok(list);

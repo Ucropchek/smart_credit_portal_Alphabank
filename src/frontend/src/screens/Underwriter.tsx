@@ -5,6 +5,7 @@ import {
   decideApplication,
   getApplication,
   listApplications,
+  listStatus,
   purposeMatches,
   scoreApplication,
   type AccountStatement,
@@ -289,7 +290,11 @@ export function Underwriter({ onCount }: { onCount?: (count: number) => void }) 
     setOutcome(savedOutcome(app))
     setReason(app.employeeDecision?.reason ?? '')
     setRows((current) =>
-      current?.map((row) => (row.number === app.number ? { ...row, step: app.step, stepTitle: app.stepTitle } : row)) ?? current,
+      current?.map((row) =>
+        row.number === app.number
+          ? { ...row, step: app.step, stepTitle: app.stepTitle, employeeDecision: app.employeeDecision?.outcome ?? null }
+          : row,
+      ) ?? current,
     )
   }
 
@@ -301,7 +306,11 @@ export function Underwriter({ onCount }: { onCount?: (count: number) => void }) 
       const app = await scoreApplication(selected)
       setLoaded(app)
       setRows((current) =>
-        current?.map((row) => (row.number === app.number ? { ...row, step: app.step, stepTitle: app.stepTitle } : row)) ?? current,
+        current?.map((row) =>
+        row.number === app.number
+          ? { ...row, step: app.step, stepTitle: app.stepTitle, employeeDecision: app.employeeDecision?.outcome ?? null }
+          : row,
+      ) ?? current,
       )
     } catch (error) {
       setScoreError(error instanceof Error ? error.message : 'Не удалось посчитать скоринг')
@@ -358,7 +367,11 @@ export function Underwriter({ onCount }: { onCount?: (count: number) => void }) 
       const app = await checkRegistries(selected)
       setLoaded(app)
       setRows((current) =>
-        current?.map((row) => (row.number === app.number ? { ...row, step: app.step, stepTitle: app.stepTitle } : row)) ?? current,
+        current?.map((row) =>
+        row.number === app.number
+          ? { ...row, step: app.step, stepTitle: app.stepTitle, employeeDecision: app.employeeDecision?.outcome ?? null }
+          : row,
+      ) ?? current,
       )
     } catch (error) {
       setCheckError(error instanceof Error ? error.message : 'Не удалось проверить реестры')
@@ -393,7 +406,7 @@ export function Underwriter({ onCount }: { onCount?: (count: number) => void }) 
                   >
                     <span className="flex items-center justify-between gap-3">
                       <span className="tnum text-sm font-semibold text-ink">#{row.number}</span>
-                      <Badge tone="info">{row.stepTitle}</Badge>
+                      <Badge tone={listStatus(row.employeeDecision, row.stepTitle).tone}>{listStatus(row.employeeDecision, row.stepTitle).label}</Badge>
                     </span>
                     <span className="truncate text-sm text-ink">{row.businessName ?? 'Компания'}</span>
                     <span className="tnum text-xs text-muted">

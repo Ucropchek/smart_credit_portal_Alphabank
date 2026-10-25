@@ -39,11 +39,13 @@ export function Sidebar({
   role,
   screen,
   queueCount,
+  applicationCount,
   onNavigate,
 }: {
   role: Role
   screen: Screen
   queueCount?: number | null
+  applicationCount?: number | null
   onNavigate: (s: Screen) => void
 }) {
   const nav = role === 'client' ? clientNav : bankNav
@@ -93,9 +95,9 @@ export function Sidebar({
               )}
               <Icon name={item.icon} className={active ? 'text-alfa' : ''} />
               {item.label}
-              {item.id === 'tracker' && (
-                <span className="ml-auto grid size-5 place-items-center rounded-full bg-alfa text-[11px] font-semibold text-white">
-                  1
+              {item.id === 'tracker' && applicationCount != null && (
+                <span className="tnum ml-auto grid size-5 place-items-center rounded-full bg-alfa text-[11px] font-semibold text-white">
+                  {applicationCount}
                 </span>
               )}
               {item.id === 'underwriter' && queueCount != null && (

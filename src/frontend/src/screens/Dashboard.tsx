@@ -1,5 +1,5 @@
-import { useEffect, useMemo, useState } from 'react'
-import { listApplications, type ApplicationListItem, type LoanDraft } from '../api/applications'
+import { useEffect, useMemo, useRef, useState } from 'react'
+import { listApplications, listStatus, type ApplicationListItem, type LoanDraft } from '../api/applications'
 import { cx } from '../components/cx'
 import { Icon } from '../components/Icon'
 import { Badge, Button, Card, CardHeader, Slider } from '../components/ui'
@@ -67,9 +67,11 @@ const stepProgress: Record<string, number> = {
 export function Dashboard({
   onApply,
   onOpenApp,
+  onCount,
 }: {
   onApply: (draft: LoanDraft) => void
   onOpenApp: (number: number) => void
+  onCount?: (count: number) => void
 }) {
   const [purpose, setPurpose] = useState<Purpose>('working')
   const [amount, setAmount] = useState(12_000_000)
@@ -79,15 +81,24 @@ export function Dashboard({
   const overpay = payment * term - amount
   const purposeLabel = purposes.find((item) => item.id === purpose)?.label ?? 'Пополнение оборотных средств'
   const [saved, setSaved] = useState<ApplicationListItem[] | null>(null)
+  const onCountRef = useRef(onCount)
+
+  useEffect(() => {
+    onCountRef.current = onCount
+  })
 
   useEffect(() => {
     let cancel = false
     listApplications()
       .then((rows) => {
-        if (!cancel) setSaved(rows)
+        if (cancel) return
+        setSaved(rows)
+        onCountRef.current?.(rows.length)
       })
       .catch(() => {
-        if (!cancel) setSaved([])
+        if (cancel) return
+        setSaved([])
+        onCountRef.current?.(0)
       })
     return () => {
       cancel = true
@@ -244,6 +255,7 @@ export function Dashboard({
           {saved?.length === 0 && <p className="py-8 text-sm text-muted">Пока нет отправленных заявок</p>}
           {saved?.map((app) => {
             const progress = stepProgress[app.step] ?? 1
+            const status = listStatus(app.employeeDecision, app.stepTitle)
             return (
               <button
                 key={app.number}
@@ -262,8 +274,8 @@ export function Dashboard({
                   <span className="tnum ml-2 text-xs text-muted">{progress}/4</span>
                 </span>
                 <span>
-                  <Badge tone="info" dot>
-                    {app.stepTitle}
+                  <Badge tone={status.tone} dot>
+                    {status.label}
                   </Badge>
                 </span>
                 <Icon name="chevronRight" size={18} className="text-muted" />

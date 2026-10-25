@@ -33,7 +33,9 @@ function AppFrame({
   draft,
   applicationNumber,
   bankQueue,
+  clientCount,
   onBankQueue,
+  onClientCount,
   onApply,
   onOpenApp,
   onSubmitted,
@@ -50,7 +52,9 @@ function AppFrame({
   draft: LoanDraft
   applicationNumber: number | null
   bankQueue: number | null
+  clientCount: number | null
   onBankQueue: (count: number) => void
+  onClientCount: (count: number) => void
   onApply: (draft: LoanDraft) => void
   onOpenApp: (number: number) => void
   onSubmitted: (number: number) => void
@@ -69,7 +73,7 @@ function AppFrame({
 
   return (
     <div className={fill ? 'flex h-screen' : 'flex min-h-[960px]'}>
-      <Sidebar role={role} screen={screen} queueCount={bankQueue} onNavigate={go} />
+      <Sidebar role={role} screen={screen} queueCount={bankQueue} applicationCount={clientCount} onNavigate={go} />
       <div className="flex min-w-0 flex-1 flex-col">
         <Header
           role={role}
@@ -83,7 +87,7 @@ function AppFrame({
         <main ref={mainRef} className={fill ? 'flex-1 overflow-y-auto' : 'flex-1'}>
           {screen === 'dashboard' && (
             <div className="mx-auto max-w-[1280px] px-8 py-8">
-              <Dashboard onApply={onApply} onOpenApp={onOpenApp} />
+              <Dashboard onApply={onApply} onOpenApp={onOpenApp} onCount={onClientCount} />
             </div>
           )}
           {screen === 'wizard' && (
@@ -153,7 +157,9 @@ function Overview({
                     draft={starter}
                     applicationNumber={null}
                     bankQueue={null}
+                    clientCount={null}
                     onBankQueue={noop}
+                    onClientCount={noop}
                     onApply={noop}
                     onOpenApp={noop}
                     onSubmitted={noop}
@@ -179,6 +185,7 @@ export default function App() {
   const [draft, setDraft] = useState<LoanDraft>(starter)
   const [applicationNumber, setApplicationNumber] = useState<number | null>(null)
   const [bankQueue, setBankQueue] = useState<number | null>(null)
+  const [clientCount, setClientCount] = useState<number | null>(null)
 
   const switchRole = (next: Role) => {
     setRole(next)
@@ -208,7 +215,9 @@ export default function App() {
       draft={draft}
       applicationNumber={applicationNumber}
       bankQueue={bankQueue}
+      clientCount={clientCount}
       onBankQueue={setBankQueue}
+      onClientCount={setClientCount}
       onApply={(next) => {
         setDraft(next)
         setScreen('wizard')
