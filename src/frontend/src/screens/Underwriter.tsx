@@ -1,5 +1,6 @@
 import { useEffect, useRef, useState } from 'react'
 import {
+  decideApplication,
   getApplication,
   listApplications,
   scoreApplication,
@@ -34,6 +35,20 @@ function decisionTone(decision: string): 'ok' | 'warn' | 'danger' | 'info' {
   return 'info'
 }
 
+const outcomes = [
+  { id: 'approve', label: 'Одобрить' },
+  { id: 'review', label: 'На разбор' },
+  { id: 'reject', label: 'Отказать' },
+] as const
+
+type Outcome = (typeof outcomes)[number]['id']
+
+function savedOutcome(app: ApplicationDetail): Outcome {
+  const outcome = app.employeeDecision?.outcome
+  if (outcome === 'approve' || outcome === 'review' || outcome === 'reject') return outcome
+  return 'review'
+}
+
 export function Underwriter({ onCount }: { onCount?: (count: number) => void }) {
   const [rows, setRows] = useState<ApplicationListItem[] | null>(null)
   const [selected, setSelected] = useState<number | null>(null)
@@ -41,6 +56,10 @@ export function Underwriter({ onCount }: { onCount?: (count: number) => void }) 
   const [errorFor, setErrorFor] = useState<number | null>(null)
   const [scoring, setScoring] = useState(false)
   const [scoreError, setScoreError] = useState<string | null>(null)
+  const [outcome, setOutcome] = useState<Outcome>('review')
+  const [reason, setReason] = useState('')
+  const [deciding, setDeciding] = useState(false)
+  const [decisionError, setDecisionError] = useState<string | null>(null)
   const onCountRef = useRef(onCount)
 
   useEffect(() => {
@@ -74,6 +93,9 @@ export function Underwriter({ onCount }: { onCount?: (count: number) => void }) 
         if (!cancel) {
           setLoaded(app)
           setErrorFor(null)
+          setOutcome(savedOutcome(app))
+          setReason(app.employeeDecision?.reason ?? '')
+          setDecisionError(null)
         }
       })
       .catch(() => {
@@ -86,6 +108,16 @@ export function Underwriter({ onCount }: { onCount?: (count: number) => void }) 
 
   const detail = loaded?.number === selected ? loaded : null
   const failed = errorFor === selected && selected != null
+  const recorded = detail?.employeeDecision?.outcome
+
+  const remember = (app: ApplicationDetail) => {
+    setLoaded(app)
+    setOutcome(savedOutcome(app))
+    setReason(app.employeeDecision?.reason ?? '')
+    setRows((current) =>
+      current?.map((row) => (row.number === app.number ? { ...row, step: app.step, stepTitle: app.stepTitle } : row)) ?? current,
+    )
+  }
 
   const score = async () => {
     if (selected == null) return
@@ -101,6 +133,27 @@ export function Underwriter({ onCount }: { onCount?: (count: number) => void }) 
       setScoreError(error instanceof Error ? error.message : 'Не удалось посчитать скоринг')
     } finally {
       setScoring(false)
+    }
+  }
+
+  const decide = async () => {
+    if (selected == null || !detail) return
+    if ((outcome === 'approve' || outcome === 'review') && !detail.score) {
+      setDecisionError('Сначала посчитайте скоринг')
+      return
+    }
+    if (outcome === 'reject' && !reason.trim()) {
+      setDecisionError('Напишите причину отказа')
+      return
+    }
+    setDeciding(true)
+    setDecisionError(null)
+    try {
+      remember(await decideApplication(selected, outcome, reason))
+    } catch (error) {
+      setDecisionError(error instanceof Error ? error.message : 'Не удалось записать решение')
+    } finally {
+      setDeciding(false)
     }
   }
 
@@ -248,10 +301,60 @@ export function Underwriter({ onCount }: { onCount?: (count: number) => void }) 
                   <p className="mt-4 text-sm text-muted">Скоринг по этой заявке ещё не считался.</p>
                 )}
 
-                <Button type="button" className="mt-6" onClick={score} disabled={scoring}>
+                <Button type="button" className="mt-6" onClick={score} disabled={scoring || recorded != null}>
                   {scoring ? 'Считаем…' : detail.score ? 'Пересчитать' : 'Посчитать скоринг'}
                 </Button>
+                {recorded != null && <p className="mt-3 text-sm text-muted">Пересчёт закрыт: решение эксперта уже записано.</p>}
                 {scoreError && <p className="mt-3 text-sm text-alfa">{scoreError}</p>}
+              </Card>
+
+              <Card className="p-8">
+                <CardHeader
+                  title="Решение эксперта"
+                  subtitle="Одобрение и разбор доступны после скоринга. Отказ можно записать сразу."
+                  action={
+                    recorded && (
+                      <Badge tone={decisionTone(recorded)} dot>
+                        Записано: {decisionLabel[recorded] ?? recorded}
+                      </Badge>
+                    )
+                  }
+                />
+                <div className="mt-6 flex flex-wrap gap-2">
+                  {outcomes.map((item) => (
+                    <button
+                      key={item.id}
+                      type="button"
+                      onClick={() => {
+                        setOutcome(item.id)
+                        setDecisionError(null)
+                      }}
+                      className={cx(
+                        'h-10 cursor-pointer rounded-full border px-4 text-sm font-medium transition-colors',
+                        outcome === item.id ? 'border-ink bg-ink text-white' : 'border-line bg-white text-ink hover:border-[#cfd4da]',
+                      )}
+                    >
+                      {item.label}
+                    </button>
+                  ))}
+                </div>
+                <label className="mt-5 block">
+                  <span className="text-sm font-medium text-ink">
+                    {outcome === 'reject' ? 'Причина отказа' : 'Комментарий для клиента'}
+                  </span>
+                  <textarea
+                    value={reason}
+                    maxLength={1000}
+                    rows={3}
+                    onChange={(event) => setReason(event.target.value)}
+                    className="mt-2 w-full resize-y rounded-xl border border-line bg-white px-4 py-3 text-sm text-ink outline-none focus:border-ink"
+                    placeholder={outcome === 'reject' ? 'Почему банк отказывает' : 'Что клиент должен увидеть вместе с решением'}
+                  />
+                </label>
+                <Button type="button" className="mt-5" onClick={decide} disabled={deciding}>
+                  {deciding ? 'Записываем…' : 'Записать решение'}
+                </Button>
+                {decisionError && <p className="mt-3 text-sm text-alfa">{decisionError}</p>}
               </Card>
             </>
           )}

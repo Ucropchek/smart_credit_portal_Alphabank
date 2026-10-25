@@ -83,6 +83,11 @@ export type ApplicationDetail = {
   score?: ApplicationScore
   product?: ApplicationProduct
   counterOffer?: CounterOffer
+  employeeDecision?: {
+    outcome: string
+    reason: string | null
+    decidedAt: string | null
+  }
 }
 
 export async function createApplication(
@@ -127,6 +132,25 @@ export async function scoreApplication(number: number): Promise<ApplicationDetai
   const body: unknown = await response.json().catch(() => null)
   if (!response.ok || !isDetail(body)) {
     const message = body && typeof body === 'object' && 'error' in body && typeof body.error === 'string' ? body.error : 'Не удалось посчитать скоринг'
+    throw new Error(message)
+  }
+  return body
+}
+
+export async function decideApplication(
+  number: number,
+  decision: 'approve' | 'review' | 'reject',
+  reason: string,
+): Promise<ApplicationDetail> {
+  const response = await fetch(`/applications/${number}/decision`, {
+    method: 'POST',
+    headers: { 'content-type': 'application/json' },
+    body: JSON.stringify({ decision, reason: reason.trim() }),
+    signal: AbortSignal.timeout(8000),
+  })
+  const body: unknown = await response.json().catch(() => null)
+  if (!response.ok || !isDetail(body)) {
+    const message = body && typeof body === 'object' && 'error' in body && typeof body.error === 'string' ? body.error : 'Не удалось записать решение'
     throw new Error(message)
   }
   return body

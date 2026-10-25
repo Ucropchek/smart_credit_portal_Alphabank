@@ -32,6 +32,12 @@ export function Tracker({ scenario, applicationNumber }: { scenario: Scenario; a
 
 const liveStages = ['Заявка подана', 'Проверка ФНС и БКИ', 'Кредитный скоринг', 'Решение банка']
 
+const clientDecision: Record<string, { title: string; short: string }> = {
+  approve: { title: 'Банк одобрил заявку', short: 'Одобрено' },
+  review: { title: 'Банк оставил заявку на разбор', short: 'На разборе' },
+  reject: { title: 'Банк отказал в кредите', short: 'Отказ' },
+}
+
 function LiveApplication({ number }: { number: number }) {
   const [loaded, setLoaded] = useState<{ number: number; detail: ApplicationDetail | null; failed: boolean } | null>(null)
 
@@ -53,6 +59,7 @@ function LiveApplication({ number }: { number: number }) {
   const detail = current?.detail ?? null
   const failed = current?.failed ?? false
   const active = detail ? Math.max(0, ['submitted', 'registryCheck', 'scoring', 'decision'].indexOf(detail.step)) : 0
+  const verdict = detail?.employeeDecision ? clientDecision[detail.employeeDecision.outcome] : undefined
 
   return (
     <div className="space-y-6">
@@ -77,8 +84,16 @@ function LiveApplication({ number }: { number: number }) {
             <div className="flex items-start">
               {liveStages.map((label, index) => {
                 const last = index === liveStages.length - 1
-                const done = index < active
-                const current = index === active
+                const settled = verdict != null
+                const done = index < active || (settled && index === active)
+                const activeStage = index === active && !settled
+                const caption = activeStage
+                  ? detail.stepTitle
+                  : settled && last
+                    ? verdict.short
+                    : done
+                      ? 'Пройдено'
+                      : 'Дальше'
                 return (
                   <div key={label} className="flex flex-1 flex-col last:flex-none last:basis-[200px]">
                     <div className="flex items-center">
@@ -86,11 +101,11 @@ function LiveApplication({ number }: { number: number }) {
                         className={cx(
                           'relative grid size-9 shrink-0 place-items-center rounded-full',
                           done && 'bg-ok text-white',
-                          current && 'bg-alfa text-white',
-                          !done && !current && 'border border-line bg-white text-muted',
+                          activeStage && 'bg-alfa text-white',
+                          !done && !activeStage && 'border border-line bg-white text-muted',
                         )}
                       >
-                        {current ? (
+                        {activeStage ? (
                           <>
                             <span className="absolute inset-0 animate-ping rounded-full bg-alfa/30" />
                             <span className="relative size-2.5 rounded-full bg-white" />
@@ -105,7 +120,7 @@ function LiveApplication({ number }: { number: number }) {
                     </div>
                     <div className="mt-3 pr-4">
                       <div className="text-sm font-semibold text-ink">{label}</div>
-                      <div className="mt-0.5 text-xs text-muted">{current ? detail.stepTitle : done ? 'Пройдено' : 'Дальше'}</div>
+                      <div className="mt-0.5 text-xs text-muted">{caption}</div>
                     </div>
                   </div>
                 )
@@ -114,7 +129,10 @@ function LiveApplication({ number }: { number: number }) {
           </Card>
 
           <Card className="p-8">
-            <CardHeader title={detail.stepTitle} subtitle={detail.purpose} />
+            <CardHeader title={verdict?.title ?? detail.stepTitle} subtitle={detail.purpose} />
+            {detail.employeeDecision?.reason?.trim() && (
+              <p className="mt-6 text-sm text-ink">{detail.employeeDecision.reason}</p>
+            )}
             <dl className="mt-6 grid grid-cols-2 gap-x-10 gap-y-4 text-sm">
               <div>
                 <dt className="text-muted">Сумма</dt>
