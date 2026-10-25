@@ -108,15 +108,18 @@ function LiveApplication({ number }: { number: number }) {
               {liveStages.map((label, index) => {
                 const last = index === liveStages.length - 1
                 const settled = verdict != null
-                const done = index < active || (settled && index === active)
-                const activeStage = index === active && !settled
+                const registryRan = detail.registries != null
+                const done = index === 1 ? registryRan : index < active || (settled && index === active)
+                const activeStage = !done && index === active && !settled
                 const caption = activeStage
                   ? detail.stepTitle
                   : settled && last
                     ? verdict.short
-                    : done
-                      ? 'Пройдено'
-                      : 'Дальше'
+                    : index === 1 && !registryRan
+                      ? 'Не запускалась'
+                      : done
+                        ? 'Пройдено'
+                        : 'Дальше'
                 return (
                   <div key={label} className="flex flex-1 flex-col last:flex-none last:basis-[200px]">
                     <div className="flex items-center">

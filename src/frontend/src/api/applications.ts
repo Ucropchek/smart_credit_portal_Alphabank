@@ -89,6 +89,7 @@ export type ApplicationDetail = {
     decidedAt: string | null
   }
   requests?: InformationRequest[]
+  registries?: RegistrySnapshot
 }
 
 export type InformationRequest = {
@@ -98,6 +99,41 @@ export type InformationRequest = {
   askedAt: string
   answeredAt: string | null
   open: boolean
+}
+
+export type RegistrySnapshot = {
+  msp: {
+    inRegistry: boolean
+    categoryCode: string | null
+    categoryName: string | null
+    newBusiness: boolean
+    headcount: number | null
+  }
+  fedresurs: {
+    bankruptcyActive: boolean
+    procedureType: string | null
+    pledgeActive: boolean
+  }
+  arbitration: {
+    openDefendantCases: number
+    openClaimSum: number
+  }
+  fns: {
+    arrearsTotal: number | null
+    disqualified: boolean
+    massLeader: boolean
+    massFounder: boolean
+    massAddress: boolean
+    hasBailiffDebt: boolean
+    accountBlocked: boolean | null
+  }
+  bki: Array<{
+    inn: string
+    debtOverdueSum: number
+    debtSum: number
+    obligationSum: number
+    scheduleCode: string | null
+  }> | null
 }
 
 export async function createApplication(
@@ -184,6 +220,19 @@ export async function answerApplication(number: number, requestId: number, text:
     signal: AbortSignal.timeout(8000),
   })
   if (!response.ok) throw new Error(await errorText(response, 'Не удалось отправить ответ'))
+}
+
+export async function checkRegistries(number: number): Promise<ApplicationDetail> {
+  const response = await fetch(`/applications/${number}/registry-check`, {
+    method: 'POST',
+    signal: AbortSignal.timeout(15000),
+  })
+  const body: unknown = await response.json().catch(() => null)
+  if (!response.ok || !isDetail(body)) {
+    const message = body && typeof body === 'object' && 'error' in body && typeof body.error === 'string' ? body.error : 'Не удалось проверить реестры'
+    throw new Error(message)
+  }
+  return body
 }
 
 async function errorText(response: Response, fallback: string) {

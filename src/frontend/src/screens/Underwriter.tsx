@@ -1,12 +1,14 @@
 import { useEffect, useRef, useState } from 'react'
 import {
   askApplication,
+  checkRegistries,
   decideApplication,
   getApplication,
   listApplications,
   scoreApplication,
   type ApplicationDetail,
   type ApplicationListItem,
+  type RegistrySnapshot,
 } from '../api/applications'
 import { cx } from '../components/cx'
 import { Badge, Button, Card, CardHeader, KV } from '../components/ui'
@@ -46,10 +48,57 @@ type Outcome = (typeof outcomes)[number]['id']
 
 const questionPresets = ['Выписка по счёту за последний квартал', 'Договоры с основными контрагентами']
 
+const procedureName: Record<string, string> = {
+  FinancialRecovery: 'Финансовое оздоровление',
+  ExternalManagement: 'Внешнее управление',
+  Tender: 'Конкурсное производство',
+  Watching: 'Наблюдение',
+  CitizenAssetsDisposal: 'Реализация имущества гражданина',
+  CitizenDebtRestructuring: 'Реструктуризация долгов гражданина',
+}
+
 function savedOutcome(app: ApplicationDetail): Outcome {
   const outcome = app.employeeDecision?.outcome
   if (outcome === 'approve' || outcome === 'review' || outcome === 'reject') return outcome
   return 'review'
+}
+
+function RegistryFacts({ registries }: { registries: RegistrySnapshot }) {
+  const overdue = registries.bki?.reduce((sum, row) => sum + row.debtOverdueSum, 0) ?? 0
+  const flags = [
+    registries.fns.disqualified ? 'Дисквалификация' : null,
+    registries.fns.massLeader ? 'Массовый руководитель' : null,
+    registries.fns.massFounder ? 'Массовый учредитель' : null,
+    registries.fns.massAddress ? 'Массовый адрес' : null,
+    registries.fns.hasBailiffDebt ? 'Долг у приставов' : null,
+  ].filter((item) => item != null)
+  const msp = registries.msp.inRegistry
+    ? [registries.msp.categoryName ?? registries.msp.categoryCode, registries.msp.headcount != null ? `${registries.msp.headcount} сотрудников` : null]
+        .filter((item) => item)
+        .join(' · ')
+    : 'Нет в реестре'
+  const bankruptcy = registries.fedresurs.bankruptcyActive
+    ? (procedureName[registries.fedresurs.procedureType ?? ''] ?? registries.fedresurs.procedureType ?? 'Процедура идёт')
+    : 'Нет'
+  const bki =
+    registries.bki == null
+      ? 'Не читалось: согласия нет'
+      : registries.bki.length === 0
+        ? 'Договоров нет'
+        : `${registries.bki.length} дог. · просрочка ${rub(overdue)}`
+
+  return (
+    <div className="mt-6 grid grid-cols-2 gap-x-8 gap-y-5">
+      <KV k="МСП" v={msp || 'В реестре'} />
+      <KV k="Банкротство" v={bankruptcy} />
+      <KV k="Залог" v={registries.fedresurs.pledgeActive ? 'Есть' : 'Нет'} />
+      <KV k="Иски к ответчику" v={`${registries.arbitration.openDefendantCases} · ${rub(registries.arbitration.openClaimSum)}`} mono />
+      <KV k="Налоговая задолженность" v={registries.fns.arrearsTotal == null ? 'Нет данных' : rub(registries.fns.arrearsTotal)} mono />
+      <KV k="Блокировка счёта" v={registries.fns.accountBlocked == null ? 'Нет данных' : registries.fns.accountBlocked ? 'Есть' : 'Нет'} />
+      <KV k="БКИ" v={bki} />
+      {flags.length > 0 && <KV k="Флаги ФНС" v={flags.join(', ')} />}
+    </div>
+  )
 }
 
 export function Underwriter({ onCount }: { onCount?: (count: number) => void }) {
@@ -66,6 +115,8 @@ export function Underwriter({ onCount }: { onCount?: (count: number) => void }) 
   const [question, setQuestion] = useState('')
   const [asking, setAsking] = useState(false)
   const [askError, setAskError] = useState<string | null>(null)
+  const [checking, setChecking] = useState(false)
+  const [checkError, setCheckError] = useState<string | null>(null)
   const onCountRef = useRef(onCount)
 
   useEffect(() => {
@@ -182,6 +233,23 @@ export function Underwriter({ onCount }: { onCount?: (count: number) => void }) 
     }
   }
 
+  const check = async () => {
+    if (selected == null) return
+    setChecking(true)
+    setCheckError(null)
+    try {
+      const app = await checkRegistries(selected)
+      setLoaded(app)
+      setRows((current) =>
+        current?.map((row) => (row.number === app.number ? { ...row, step: app.step, stepTitle: app.stepTitle } : row)) ?? current,
+      )
+    } catch (error) {
+      setCheckError(error instanceof Error ? error.message : 'Не удалось проверить реестры')
+    } finally {
+      setChecking(false)
+    }
+  }
+
   return (
     <div className="space-y-6">
       <div>
@@ -257,6 +325,29 @@ export function Underwriter({ onCount }: { onCount?: (count: number) => void }) 
                     }
                   />
                 </div>
+              </Card>
+
+              <Card className="p-8">
+                <CardHeader
+                  title="Реестры"
+                  subtitle="Снимок ФНС, Федресурса, арбитража и БКИ сохраняется в заявке"
+                  action={
+                    detail.registries && (
+                      <Badge tone="ok" dot>
+                        Снято
+                      </Badge>
+                    )
+                  }
+                />
+                {detail.registries ? (
+                  <RegistryFacts registries={detail.registries} />
+                ) : (
+                  <p className="mt-4 text-sm text-muted">Проверка ещё не запускалась.</p>
+                )}
+                <Button type="button" className="mt-6" onClick={check} disabled={checking}>
+                  {checking ? 'Проверяем…' : detail.registries ? 'Обновить снимок' : 'Проверить реестры'}
+                </Button>
+                {checkError && <p className="mt-3 text-sm text-alfa">{checkError}</p>}
               </Card>
 
               <Card className="p-8">
