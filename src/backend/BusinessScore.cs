@@ -443,6 +443,8 @@ static class BusinessScore
             ? "Суммы налоговой задолженности нет. Балл 0."
             : $"Сумма налоговой задолженности {Num(arrearsTotal.Value)}. Балл {arrearsPoints}.";
 
+        // The company card has no statement. Application scoring replaces this zero
+        // from the turnover saved on the application.
         const int statementPoints = 0;
         var raw = agePoints + categoryPoints + newBusinessPoints + bankruptcyPoints + pledgePoints
             + claimPoints + schedulePoints + arrearsPoints + statementPoints;

@@ -76,13 +76,14 @@ static class ApplicationRoutes
     static async Task<IResult> ListAsync(NpgsqlDataSource dataSource, PortalSchema portal)
     {
         await portal.EnsureAsync();
-        var rows = new List<(long Number, decimal Amount, int TermMonths, string RegistrationId, string Step, string? Decision, int OpenRequestCount)>();
+        var rows = new List<(long Number, decimal Amount, int TermMonths, string RegistrationId, string Step, string? Decision, int OpenRequestCount, decimal? CounterAmount)>();
         await using (var command = dataSource.CreateCommand(
             """
             select a.id, a.amount, a.term_months, a.registration_id, a.step, a.employee_decision,
                    (select count(*)::int
                     from portal.information_requests r
-                    where r.application_id = a.id and r.answered_at is null)
+                    where r.application_id = a.id and r.answered_at is null),
+                   a.counter_amount
             from portal.applications a
             order by a.id
             """))
@@ -97,7 +98,8 @@ static class ApplicationRoutes
                     reader.GetString(3),
                     reader.GetString(4),
                     reader.IsDBNull(5) ? null : reader.GetString(5),
-                    reader.GetInt32(6)));
+                    reader.GetInt32(6),
+                    reader.IsDBNull(7) ? null : reader.GetDecimal(7)));
             }
         }
 
@@ -114,7 +116,8 @@ static class ApplicationRoutes
                 step = row.Step,
                 stepTitle = ApplicationSteps.Title(row.Step),
                 employeeDecision = row.Decision,
-                openRequestCount = row.OpenRequestCount
+                openRequestCount = row.OpenRequestCount,
+                counterAmount = row.CounterAmount
             };
         });
         return Results.Ok(list);
@@ -353,13 +356,18 @@ static class ApplicationRoutes
         if (score.Status != 200 || score.Body is null)
             return score.ToResult();
 
-        var total = ReadTotal(score.Body);
-        var offer = ProductOffer.Build(score.InMsp, score.CategoryCode, total, form.Amount, form.TermMonths);
         var statementConsent = await ReadStatementConsentAsync(dataSource, number);
         var turnover = statementConsent == true ? await TurnoverAsync(dataSource, number) : [];
         var scoreNode = JsonNode.Parse(JsonSerializer.Serialize(score.Body, Json));
+        var total = ReadTotal(score.Body);
+        var decision = ReadDecision(score.Body);
         if (scoreNode is not null)
-            ApplyStatementDetail(scoreNode, StatementScoreDetail(statementConsent, turnover));
+        {
+            ApplyStatementScore(scoreNode, statementConsent, turnover, form.Amount);
+            total = ReadInt(scoreNode["total"], total);
+            decision = scoreNode["decision"]?.GetValue<string>() ?? decision;
+        }
+        var offer = ProductOffer.Build(score.InMsp, score.CategoryCode, total, form.Amount, form.TermMonths);
         var scoreJson = scoreNode?.ToJsonString(Json) ?? JsonSerializer.Serialize(score.Body, Json);
 
         await using (var command = dataSource.CreateCommand(
@@ -385,7 +393,7 @@ static class ApplicationRoutes
             command.Parameters.AddWithValue("id", number);
             command.Parameters.Add(Jsonb("score", scoreJson));
             command.Parameters.AddWithValue("total", total);
-            command.Parameters.AddWithValue("decision", ReadDecision(score.Body));
+            command.Parameters.AddWithValue("decision", decision);
             command.Parameters.AddWithValue("productCode", offer.Code);
             command.Parameters.AddWithValue("maxAmount", offer.MaxAmount);
             command.Parameters.AddWithValue("subsidized", offer.SubsidizedAvailable);
@@ -515,7 +523,23 @@ static class ApplicationRoutes
 
         JsonNode? score = scoreJson is null ? null : JsonNode.Parse(scoreJson);
         if (score is not null)
-            ApplyStatementDetail(score, StatementScoreDetail(statementConsent, turnover));
+        {
+            var storedTotal = ReadInt(score["total"]);
+            ApplyStatementScore(score, statementConsent, turnover, amount);
+            var adjustedTotal = ReadInt(score["total"], storedTotal);
+            if (adjustedTotal != storedTotal && productCode is not null)
+            {
+                var offer = ProductOffer.Build(mspCategory is "1" or "2" or "3", mspCategory, adjustedTotal, amount, termMonths);
+                productCode = offer.Code;
+                maxAmount = offer.MaxAmount;
+                subsidized = offer.SubsidizedAvailable;
+                mspCategory = offer.MspCategory;
+                ordinaryMax = offer.OrdinaryMaxAmount;
+                counterAmount = offer.CounterAmount;
+                counterTerm = offer.CounterTermMonths;
+                counterProduct = offer.CounterProduct;
+            }
+        }
         var hideStops = clientView
             && employeeDecision == "reject"
             && string.IsNullOrEmpty(employeeReason);
@@ -721,13 +745,30 @@ static class ApplicationRoutes
         return value is bool consent ? consent : null;
     }
 
-    static string StatementScoreDetail(bool? consent, IReadOnlyList<TurnoverMonth> months)
+    static int StatementPoints(bool? consent, IReadOnlyList<TurnoverMonth> months, decimal amount)
+    {
+        if (consent != true || months.Count == 0)
+            return 0;
+        var incoming = months.Sum(month => month.Incoming);
+        var outgoing = months.Sum(month => month.Outgoing);
+        if (incoming - outgoing <= 0)
+            return -8;
+        return incoming >= amount ? 16 : 8;
+    }
+
+    static string StatementScoreDetail(bool? consent, IReadOnlyList<TurnoverMonth> months, decimal amount, int points)
     {
         if (consent == true && months.Count > 0)
         {
             var incoming = months.Sum(month => month.Incoming);
             var outgoing = months.Sum(month => month.Outgoing);
-            return $"Поступления {Money(incoming)}, списания {Money(outgoing)} за {months.Count} мес. Балл 0.";
+            var net = incoming - outgoing;
+            var rule = net <= 0
+                ? "Чистый поток не положительный."
+                : incoming >= amount
+                    ? "Поступления не меньше суммы кредита."
+                    : "Поступления меньше суммы кредита.";
+            return $"Поступления {Money(incoming)}, списания {Money(outgoing)} за {months.Count} мес. {rule} Балл {points}.";
         }
 
         if (consent == false)
@@ -737,14 +778,60 @@ static class ApplicationRoutes
 
     static string Money(decimal value) => value.ToString(CultureInfo.InvariantCulture);
 
-    static void ApplyStatementDetail(JsonNode score, string detail)
+    static int ReadInt(JsonNode? node, int fallback = 0)
+    {
+        if (node is null)
+            return fallback;
+        try
+        {
+            return node.GetValue<int>();
+        }
+        catch (FormatException)
+        {
+            return fallback;
+        }
+        catch (InvalidOperationException)
+        {
+            return fallback;
+        }
+    }
+
+    static void ApplyStatementScore(JsonNode score, bool? consent, IReadOnlyList<TurnoverMonth> months, decimal amount)
     {
         if (score["points"] is not JsonArray points)
             return;
+        JsonNode? statement = null;
         foreach (var item in points)
         {
             if (item?["factor"]?.GetValue<string>() == "statement")
-                item["detail"] = detail;
+                statement = item;
+        }
+        if (statement is null)
+            return;
+
+        var previous = ReadInt(statement["points"]);
+        var next = StatementPoints(consent, months, amount);
+        statement["points"] = next;
+        statement["detail"] = StatementScoreDetail(consent, months, amount, next);
+
+        var before = ReadInt(score["totalBeforeCap"], ReadInt(score["total"]));
+        var raw = before - previous + next;
+        var total = Math.Clamp(raw, 0, 100);
+        score["totalBeforeCap"] = raw;
+        score["total"] = total;
+
+        var fired = score["stops"]?["fired"] is JsonArray stops ? stops.Count : 0;
+        if (fired > 0)
+            return;
+        if (total >= 70)
+        {
+            score["decision"] = "approve";
+            score["reason"] = $"Одобрение: стоп-факторов нет, балл {total} из 100, порог одобрения 70.";
+        }
+        else
+        {
+            score["decision"] = "review";
+            score["reason"] = $"Разбор: стоп-факторов нет, балл {total} из 100, это ниже порога 70.";
         }
     }
 

@@ -4,6 +4,7 @@ import { cx } from '../components/cx'
 import { Icon } from '../components/Icon'
 import { Badge, Button, Card, CardHeader, Slider } from '../components/ui'
 import { annuity, mln, months, rub } from '../format'
+import { preliminaryRate } from '../productRate'
 
 type Purpose = 'working' | 'equipment' | 'contract'
 
@@ -14,18 +15,20 @@ const purposes: { id: Purpose; label: string }[] = [
 ]
 
 function recommend(purpose: Purpose, amount: number, term: number) {
+  const label = purposes.find((item) => item.id === purpose)?.label ?? ''
+  const rate = preliminaryRate(label, amount, term) ?? 19.9
   if (purpose === 'working') {
     return amount <= 15_000_000
       ? {
           name: 'Оборотный кредит без залога',
-          rate: 19.9,
+          rate,
           tag: 'Без залога и поручителей',
           time: 'Решение за 1 день',
           match: 96,
         }
       : {
           name: 'Оборотный кредит под залог',
-          rate: 17.4,
+          rate,
           tag: 'Залог — недвижимость или транспорт',
           time: 'Решение за 3 дня',
           match: 88,
@@ -35,14 +38,14 @@ function recommend(purpose: Purpose, amount: number, term: number) {
     return term >= 24
       ? {
           name: 'Инвестиционный кредит на оборудование',
-          rate: 16.9,
+          rate,
           tag: 'Залог — приобретаемое оборудование',
           time: 'Решение за 2 дня',
           match: 93,
         }
       : {
           name: 'Экспресс-кредит на оборудование',
-          rate: 18.7,
+          rate,
           tag: 'Без первоначального взноса',
           time: 'Решение за 1 день',
           match: 85,
@@ -50,7 +53,7 @@ function recommend(purpose: Purpose, amount: number, term: number) {
   }
   return {
     name: 'Кредит на исполнение госконтракта',
-    rate: 18.2,
+    rate,
     tag: 'Под 44-ФЗ и 223-ФЗ',
     time: 'Решение за 2 дня',
     match: 91,

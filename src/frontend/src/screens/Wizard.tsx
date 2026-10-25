@@ -5,6 +5,7 @@ import { lookupBusiness, mspProfile, registrationId, type BusinessCard, type Bki
 import { entrepreneurName, hasRegistryRecord, lookupCompany, type CompanyLookup } from '../api/companies'
 import { cx } from '../components/cx'
 import { annuity, months, rub } from '../format'
+import { preliminaryRate } from '../productRate'
 import { Icon } from '../components/Icon'
 import { Badge, Button, Card, CardHeader, Field, KV, Slider, inputCls } from '../components/ui'
 
@@ -399,7 +400,8 @@ export function Wizard({ initial, onSubmit }: { initial: LoanDraft; onSubmit: (n
   const load = revenueValue ? Math.round(((debtValue + amount) / revenueValue) * 100) : 0
   const foundId = lookup.status === 'ready' ? registrationId(lookup.company) : null
   const purposeReady = purpose.trim().length > 0
-  const payment = annuity(amount, 19.9, termMonths)
+  const rate = preliminaryRate(purpose, amount, termMonths)
+  const payment = rate == null ? null : annuity(amount, rate, termMonths)
   const profile = lookup.status === 'ready' ? lookup.profile : null
   const registryRevenue = registryMoney(profile?.fns.revenue)
   const registryStaff = registryCount(profile?.fns.employeeCount)
@@ -701,14 +703,14 @@ export function Wizard({ initial, onSubmit }: { initial: LoanDraft; onSubmit: (n
               <dl className="mt-5 space-y-3 text-sm">
                 <div className="flex justify-between gap-4">
                   <dt className="text-muted">Предварительная ставка</dt>
-                  <dd className="tnum font-medium text-ink">от 19,9%</dd>
+                  <dd className="tnum font-medium text-ink">{rate == null ? 'Нет для этой цели' : `от ${rate.toLocaleString('ru-RU')}%`}</dd>
                 </div>
                 <div className="flex justify-between">
                   <dt className="text-muted">Платёж</dt>
-                  <dd className="tnum font-medium text-ink">≈ {rub(payment)}/мес</dd>
+                  <dd className="tnum font-medium text-ink">{payment == null ? '—' : `≈ ${rub(payment)}/мес`}</dd>
                 </div>
               </dl>
-              <p className="mt-3 text-xs text-muted">Калькулятор продукта. Решение банка эту ставку не фиксирует.</p>
+              <p className="mt-3 text-xs text-muted">Та же предварительная ставка продукта, что в решении банка. Балл её не считает.</p>
               <div className="mt-6 border-t border-line pt-5">
                 <div className="flex justify-between text-sm">
                   <span className="text-muted">Готовность заявки</span>

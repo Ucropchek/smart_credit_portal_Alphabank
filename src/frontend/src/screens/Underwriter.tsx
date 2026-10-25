@@ -18,7 +18,8 @@ import { DocumentsCard } from '../components/DocumentsCard'
 import { FinancesCard } from '../components/FinancesCard'
 import { GoodsCard } from '../components/GoodsCard'
 import { Badge, Button, Card, CardHeader, KV } from '../components/ui'
-import { monthLabel, months, rub, ruDate } from '../format'
+import { annuity, monthLabel, months, rub, ruDate } from '../format'
+import { preliminaryRate } from '../productRate'
 
 const decisionLabel: Record<string, string> = {
   approve: 'Одобрение',
@@ -331,6 +332,10 @@ export function Underwriter({
   const detail = loaded?.number === selected ? loaded : null
   const failed = errorFor === selected && selected != null
   const recorded = detail?.employeeDecision?.outcome
+  const rate = detail ? preliminaryRate(detail.purpose, detail.amount, detail.termMonths) : null
+  const paymentAmount = detail?.counterOffer && detail.counterOffer.amount > 0 ? detail.counterOffer.amount : detail?.amount
+  const paymentTerm = detail?.counterOffer?.termMonths ?? detail?.termMonths
+  const payment = rate != null && paymentAmount != null && paymentTerm != null ? annuity(paymentAmount, rate, paymentTerm) : null
 
   const remember = (app: ApplicationDetail) => {
     setLoaded(app)
@@ -677,6 +682,8 @@ export function Underwriter({
                       <div className="mt-6 grid grid-cols-2 gap-x-8 gap-y-5 border-t border-line pt-6">
                         <KV k="Продукт" v={productLabel[detail.product.code] ?? detail.product.code} />
                         <KV k="Лимит по баллу" v={rub(detail.product.maxAmount)} mono />
+                        {rate != null && <KV k="Предварительная ставка" v={`от ${rate.toLocaleString('ru-RU')}%`} />}
+                        {payment != null && <KV k="Платёж по этой ставке" v={`${rub(payment)}/мес`} mono />}
                         {detail.counterOffer && detail.counterOffer.amount < detail.amount && (
                           <KV k="Сумма в пределах лимита" v={rub(detail.counterOffer.amount)} mono />
                         )}
