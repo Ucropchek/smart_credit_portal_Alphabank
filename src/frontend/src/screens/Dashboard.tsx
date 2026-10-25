@@ -1,4 +1,5 @@
-import { useMemo, useState } from 'react'
+import { useEffect, useMemo, useState } from 'react'
+import { listApplications, type ApplicationListItem, type LoanDraft } from '../api/applications'
 import { cx } from '../components/cx'
 import { Icon } from '../components/Icon'
 import { Badge, Button, Card, CardHeader, Slider } from '../components/ui'
@@ -56,46 +57,42 @@ function recommend(purpose: Purpose, amount: number, term: number) {
   }
 }
 
-const apps = [
-  {
-    id: 'ALFA-2026-89',
-    product: 'Оборотный кредит без залога',
-    amount: 15_000_000,
-    term: 24,
-    date: '12 мая 2026',
-    status: 'Встречное предложение',
-    tone: 'warn' as const,
-    step: 4,
-  },
-  {
-    id: 'ALFA-2026-74',
-    product: 'Кредит на оборудование',
-    amount: 8_400_000,
-    term: 36,
-    date: '28 апр 2026',
-    status: 'Кредитный скоринг',
-    tone: 'info' as const,
-    step: 3,
-  },
-  {
-    id: 'ALFA-2026-41',
-    product: 'Овердрафт для бизнеса',
-    amount: 3_000_000,
-    term: 12,
-    date: '02 мар 2026',
-    status: 'Одобрено',
-    tone: 'ok' as const,
-    step: 5,
-  },
-]
+const stepProgress: Record<string, number> = {
+  submitted: 1,
+  registryCheck: 2,
+  scoring: 3,
+  decision: 4,
+}
 
-export function Dashboard({ onApply, onOpenApp }: { onApply: () => void; onOpenApp: () => void }) {
+export function Dashboard({
+  onApply,
+  onOpenApp,
+}: {
+  onApply: (draft: LoanDraft) => void
+  onOpenApp: (number: number) => void
+}) {
   const [purpose, setPurpose] = useState<Purpose>('working')
   const [amount, setAmount] = useState(12_000_000)
   const [term, setTerm] = useState(24)
   const rec = useMemo(() => recommend(purpose, amount, term), [purpose, amount, term])
   const payment = annuity(amount, rec.rate, term)
   const overpay = payment * term - amount
+  const purposeLabel = purposes.find((item) => item.id === purpose)?.label ?? 'Пополнение оборотных средств'
+  const [saved, setSaved] = useState<ApplicationListItem[] | null>(null)
+
+  useEffect(() => {
+    let cancel = false
+    listApplications()
+      .then((rows) => {
+        if (!cancel) setSaved(rows)
+      })
+      .catch(() => {
+        if (!cancel) setSaved([])
+      })
+    return () => {
+      cancel = true
+    }
+  }, [])
 
   return (
     <div className="space-y-6">
@@ -211,7 +208,7 @@ export function Dashboard({ onApply, onOpenApp }: { onApply: () => void; onOpenA
           </ul>
 
           <div className="mt-auto flex items-center gap-3 pt-8">
-            <Button type="button" size="lg" className="flex-1" onClick={onApply}>
+            <Button type="button" size="lg" className="flex-1" onClick={() => onApply({ purpose: purposeLabel, amount, termMonths: term })}>
               Оформить заявку
               <Icon name="arrowRight" size={18} />
             </Button>
@@ -236,55 +233,43 @@ export function Dashboard({ onApply, onOpenApp }: { onApply: () => void; onOpenA
         <div className="mt-6">
           <div className="grid grid-cols-[1.1fr_2fr_1.1fr_0.8fr_2fr_1.3fr_32px] gap-4 border-b border-line pb-3 text-xs font-medium text-muted">
             <span>Номер</span>
-            <span>Продукт</span>
+            <span>Компания</span>
             <span className="text-right">Сумма</span>
             <span className="text-right">Срок</span>
             <span>Этап конвейера</span>
             <span>Статус</span>
             <span />
           </div>
-          {apps.map((app) => (
-            <button
-              key={app.id}
-              type="button"
-              onClick={onOpenApp}
-              className="grid w-full cursor-pointer grid-cols-[1.1fr_2fr_1.1fr_0.8fr_2fr_1.3fr_32px] items-center gap-4 border-b border-line py-4 text-left text-sm transition-colors last:border-0 hover:bg-canvas/50"
-            >
-              <span>
-                <span className="tnum block font-semibold text-ink">#{app.id}</span>
-                <span className="block text-xs text-muted">{app.date}</span>
-              </span>
-              <span className="text-ink">{app.product}</span>
-              <span className="tnum text-right font-medium text-ink">{rub(app.amount)}</span>
-              <span className="tnum text-right text-ink">{app.term} мес</span>
-              <span className="flex items-center gap-1">
-                {[1, 2, 3, 4, 5].map((step) => (
-                  <span
-                    key={step}
-                    className={cx(
-                      'h-1.5 flex-1 rounded-full',
-                      step < app.step
-                        ? 'bg-ink'
-                        : step === app.step
-                          ? app.tone === 'ok'
-                            ? 'bg-ok'
-                            : app.tone === 'warn'
-                              ? 'bg-warn'
-                              : 'bg-info'
-                          : 'bg-line',
-                    )}
-                  />
-                ))}
-                <span className="tnum ml-2 text-xs text-muted">{Math.min(app.step, 5)}/5</span>
-              </span>
-              <span>
-                <Badge tone={app.tone} dot>
-                  {app.status}
-                </Badge>
-              </span>
-              <Icon name="chevronRight" size={18} className="text-muted" />
-            </button>
-          ))}
+          {saved == null && <p className="py-8 text-sm text-muted">Загружаем заявки…</p>}
+          {saved?.length === 0 && <p className="py-8 text-sm text-muted">Пока нет отправленных заявок</p>}
+          {saved?.map((app) => {
+            const progress = stepProgress[app.step] ?? 1
+            return (
+              <button
+                key={app.number}
+                type="button"
+                onClick={() => onOpenApp(app.number)}
+                className="grid w-full cursor-pointer grid-cols-[1.1fr_2fr_1.1fr_0.8fr_2fr_1.3fr_32px] items-center gap-4 border-b border-line py-4 text-left text-sm transition-colors last:border-0 hover:bg-canvas/50"
+              >
+                <span className="tnum font-semibold text-ink">#{app.number}</span>
+                <span className="text-ink">{app.businessName ?? 'Компания'}</span>
+                <span className="tnum text-right font-medium text-ink">{rub(app.amount)}</span>
+                <span className="tnum text-right text-ink">{app.termMonths} мес</span>
+                <span className="flex items-center gap-1">
+                  {[1, 2, 3, 4].map((step) => (
+                    <span key={step} className={cx('h-1.5 flex-1 rounded-full', step <= progress ? 'bg-ink' : 'bg-line')} />
+                  ))}
+                  <span className="tnum ml-2 text-xs text-muted">{progress}/4</span>
+                </span>
+                <span>
+                  <Badge tone="info" dot>
+                    {app.stepTitle}
+                  </Badge>
+                </span>
+                <Icon name="chevronRight" size={18} className="text-muted" />
+              </button>
+            )
+          })}
         </div>
       </Card>
     </div>

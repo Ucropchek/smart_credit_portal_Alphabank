@@ -1,9 +1,10 @@
-import { useState } from 'react'
+import { useEffect, useState } from 'react'
+import { getApplication, type ApplicationDetail } from '../api/applications'
 import { cx } from '../components/cx'
 import { Icon } from '../components/Icon'
 import type { Scenario } from '../components/Shell'
 import { Badge, Button, Card, CardHeader } from '../components/ui'
-import { annuity, rub } from '../format'
+import { annuity, months, rub } from '../format'
 
 const stages = [
   { label: 'Заявка подана', time: '12 мая, 10:24' },
@@ -24,7 +25,125 @@ function Row({ k, v, delta }: { k: string; v: string; delta?: string }) {
   )
 }
 
-export function Tracker({ scenario }: { scenario: Scenario }) {
+export function Tracker({ scenario, applicationNumber }: { scenario: Scenario; applicationNumber: number | null }) {
+  if (applicationNumber != null) return <LiveApplication number={applicationNumber} />
+  return <DemoTracker scenario={scenario} />
+}
+
+const liveStages = ['Заявка подана', 'Проверка ФНС и БКИ', 'Кредитный скоринг', 'Решение банка']
+
+function LiveApplication({ number }: { number: number }) {
+  const [loaded, setLoaded] = useState<{ number: number; detail: ApplicationDetail | null; failed: boolean } | null>(null)
+
+  useEffect(() => {
+    let cancel = false
+    getApplication(number)
+      .then((app) => {
+        if (!cancel) setLoaded({ number, detail: app, failed: false })
+      })
+      .catch(() => {
+        if (!cancel) setLoaded({ number, detail: null, failed: true })
+      })
+    return () => {
+      cancel = true
+    }
+  }, [number])
+
+  const current = loaded?.number === number ? loaded : null
+  const detail = current?.detail ?? null
+  const failed = current?.failed ?? false
+  const active = detail ? Math.max(0, ['submitted', 'registryCheck', 'scoring', 'decision'].indexOf(detail.step)) : 0
+
+  return (
+    <div className="space-y-6">
+      <div>
+        <p className="tnum text-sm text-muted">Заявка #{number}</p>
+        <h1 className="mt-1 text-[32px] font-semibold tracking-[-0.025em] text-ink">
+          {detail?.business.name ?? 'Статус заявки'}
+        </h1>
+      </div>
+
+      {failed && (
+        <Card className="p-8">
+          <p className="text-sm text-ink">Не удалось загрузить заявку #{number}.</p>
+        </Card>
+      )}
+
+      {!failed && !detail && <p className="text-sm text-muted">Загружаем заявку…</p>}
+
+      {detail && (
+        <>
+          <Card className="px-8 py-7">
+            <div className="flex items-start">
+              {liveStages.map((label, index) => {
+                const last = index === liveStages.length - 1
+                const done = index < active
+                const current = index === active
+                return (
+                  <div key={label} className="flex flex-1 flex-col last:flex-none last:basis-[200px]">
+                    <div className="flex items-center">
+                      <span
+                        className={cx(
+                          'relative grid size-9 shrink-0 place-items-center rounded-full',
+                          done && 'bg-ok text-white',
+                          current && 'bg-alfa text-white',
+                          !done && !current && 'border border-line bg-white text-muted',
+                        )}
+                      >
+                        {current ? (
+                          <>
+                            <span className="absolute inset-0 animate-ping rounded-full bg-alfa/30" />
+                            <span className="relative size-2.5 rounded-full bg-white" />
+                          </>
+                        ) : done ? (
+                          <Icon name="check" size={18} strokeWidth={2.5} />
+                        ) : (
+                          <span className="tnum text-xs font-semibold">{index + 1}</span>
+                        )}
+                      </span>
+                      {!last && <span className={cx('mx-3 h-0.5 flex-1 rounded-full', done ? 'bg-ok' : 'bg-line')} />}
+                    </div>
+                    <div className="mt-3 pr-4">
+                      <div className="text-sm font-semibold text-ink">{label}</div>
+                      <div className="mt-0.5 text-xs text-muted">{current ? detail.stepTitle : done ? 'Пройдено' : 'Дальше'}</div>
+                    </div>
+                  </div>
+                )
+              })}
+            </div>
+          </Card>
+
+          <Card className="p-8">
+            <CardHeader title={detail.stepTitle} subtitle={detail.purpose} />
+            <dl className="mt-6 grid grid-cols-2 gap-x-10 gap-y-4 text-sm">
+              <div>
+                <dt className="text-muted">Сумма</dt>
+                <dd className="tnum mt-1 text-lg font-semibold text-ink">{rub(detail.amount)}</dd>
+              </div>
+              <div>
+                <dt className="text-muted">Срок</dt>
+                <dd className="tnum mt-1 text-lg font-semibold text-ink">{months(detail.termMonths)}</dd>
+              </div>
+              <div>
+                <dt className="text-muted">ИНН</dt>
+                <dd className="tnum mt-1 font-medium text-ink">{detail.inn}</dd>
+              </div>
+              <div>
+                <dt className="text-muted">ОГРН</dt>
+                <dd className="tnum mt-1 font-medium text-ink">{detail.registrationId}</dd>
+              </div>
+            </dl>
+            {detail.step === 'submitted' && (
+              <p className="mt-6 text-sm text-muted">Заявка принята. Банк ещё не начал проверку реестров и скоринг.</p>
+            )}
+          </Card>
+        </>
+      )}
+    </div>
+  )
+}
+
+function DemoTracker({ scenario }: { scenario: Scenario }) {
   const [statement, setStatement] = useState<'idle' | 'loading' | 'done'>('idle')
   const [signed, setSigned] = useState(false)
   const [signing, setSigning] = useState(false)

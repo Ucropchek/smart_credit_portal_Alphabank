@@ -1,4 +1,5 @@
 import { useEffect, useRef, useState } from 'react'
+import type { LoanDraft } from './api/applications'
 import { Header, Sidebar, type Role, type Scenario, type Screen } from './components/Shell'
 import { Dashboard } from './screens/Dashboard'
 import { Tracker } from './screens/Tracker'
@@ -18,10 +19,21 @@ const frames: { screen: Screen; role: Role; n: number }[] = [
   { screen: 'underwriter', role: 'bank', n: 4 },
 ]
 
+const starter: LoanDraft = {
+  purpose: 'Пополнение оборотных средств',
+  amount: 12_000_000,
+  termMonths: 24,
+}
+
 function AppFrame({
   role,
   screen,
   scenario,
+  draft,
+  applicationNumber,
+  onApply,
+  onOpenApp,
+  onSubmitted,
   onRole,
   onScenario,
   go,
@@ -32,6 +44,11 @@ function AppFrame({
   role: Role
   screen: Screen
   scenario: Scenario
+  draft: LoanDraft
+  applicationNumber: number | null
+  onApply: (draft: LoanDraft) => void
+  onOpenApp: (number: number) => void
+  onSubmitted: (number: number) => void
   onRole: (r: Role) => void
   onScenario: (s: Scenario) => void
   go: (s: Screen) => void
@@ -61,17 +78,17 @@ function AppFrame({
         <main ref={mainRef} className={fill ? 'flex-1 overflow-y-auto' : 'flex-1'}>
           {screen === 'dashboard' && (
             <div className="mx-auto max-w-[1280px] px-8 py-8">
-              <Dashboard onApply={() => go('wizard')} onOpenApp={() => go('tracker')} />
+              <Dashboard onApply={onApply} onOpenApp={onOpenApp} />
             </div>
           )}
           {screen === 'wizard' && (
             <div className="mx-auto max-w-[1280px] px-8 py-8">
-              <Wizard onSubmit={() => go('tracker')} />
+              <Wizard key={`${draft.purpose}:${draft.amount}:${draft.termMonths}`} initial={draft} onSubmit={onSubmitted} />
             </div>
           )}
           {screen === 'tracker' && (
             <div className="mx-auto max-w-[1280px] px-8 py-8">
-              <Tracker scenario={scenario} />
+              <Tracker scenario={scenario} applicationNumber={applicationNumber} />
             </div>
           )}
         </main>
@@ -123,6 +140,11 @@ function Overview({
                     role={frame.role}
                     screen={frame.screen}
                     scenario={scenario}
+                    draft={starter}
+                    applicationNumber={null}
+                    onApply={noop}
+                    onOpenApp={noop}
+                    onSubmitted={noop}
                     onRole={noop}
                     onScenario={noop}
                     go={noop}
@@ -142,6 +164,8 @@ export default function App() {
   const [screen, setScreen] = useState<Screen>('dashboard')
   const [scenario, setScenario] = useState<Scenario>('counter')
   const [overview, setOverview] = useState(false)
+  const [draft, setDraft] = useState<LoanDraft>(starter)
+  const [applicationNumber, setApplicationNumber] = useState<number | null>(null)
 
   const switchRole = (next: Role) => {
     setRole(next)
@@ -168,9 +192,24 @@ export default function App() {
       role={role}
       screen={screen}
       scenario={scenario}
+      draft={draft}
+      applicationNumber={applicationNumber}
+      onApply={(next) => {
+        setDraft(next)
+        setScreen('wizard')
+      }}
+      onOpenApp={(number) => {
+        setApplicationNumber(number)
+        setScreen('tracker')
+      }}
+      onSubmitted={(number) => {
+        setApplicationNumber(number)
+        setScreen('tracker')
+      }}
       onRole={switchRole}
       onScenario={(next) => {
         setScenario(next)
+        setApplicationNumber(null)
         if (role === 'client') setScreen('tracker')
       }}
       go={setScreen}
