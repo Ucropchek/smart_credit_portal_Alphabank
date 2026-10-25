@@ -28,9 +28,11 @@ class FakeSearcher:
         self.fail_on = set(fail_on)
         self.engine_down = engine_down
         self.calls = []
+        self.purposes = []
 
     async def run(self, keywords, budget_rub, purpose=None, max_results=10):
         self.calls.append((keywords, budget_rub))
+        self.purposes.append(purpose)
         await asyncio.sleep(self.delay)
         if keywords in self.fail_on:
             raise RuntimeError("search engine down")
@@ -77,6 +79,54 @@ def test_backend_handoff_is_accepted_fast_and_searched_in_background():
     assert [entry["code"] for entry in body["results"]] == ["laptop", "mfu"]
     assert body["results"][0]["search"]["offers"][0]["url"] == "https://shop.ru/Ноутбук"
     assert searcher.calls == [("Ноутбук", Decimal("500000.0")), ("МФУ", Decimal("500000.0"))]
+
+
+PURPOSE_BODY = {
+    "applicationId": 10,
+    "amount": 1500000,
+    "purpose": "зерноуборочный комбайн",
+    "category": {
+        "purpose": "зерноуборочный комбайн",
+        "matches": [
+            {
+                "code": "grain-harvester",
+                "title": "Зерноуборочный комбайн",
+                "keywords": ["зерноуборочн комбайн", "зерноуборочн"],
+            }
+        ],
+    },
+}
+
+
+def test_handoff_with_loan_purpose_passes_it_to_the_search_and_keeps_it():
+    searcher = FakeSearcher()
+    client, _ = make_client(searcher)
+    with client:
+        assert client.post("/", json=PURPOSE_BODY).status_code == 202
+        body = wait_for(client, 10)
+    assert searcher.calls == [("Зерноуборочный комбайн", Decimal("1500000"))]
+    assert searcher.purposes == ["зерноуборочный комбайн"]
+    assert body["purpose"] == "зерноуборочный комбайн"
+
+
+def test_purpose_inside_category_is_used_when_the_top_level_one_is_missing():
+    body = {**PURPOSE_BODY, "applicationId": 11}
+    del body["purpose"]
+    searcher = FakeSearcher()
+    client, _ = make_client(searcher)
+    with client:
+        client.post("/", json=body)
+        wait_for(client, 11)
+    assert searcher.purposes == ["зерноуборочный комбайн"]
+
+
+def test_handoff_without_purpose_still_works():
+    searcher = FakeSearcher()
+    client, _ = make_client(searcher)
+    with client:
+        client.post("/", json=BACKEND_BODY)
+        assert wait_for(client, 42)["purpose"] is None
+    assert searcher.purposes == [None, None]
 
 
 def test_repeated_handoff_does_not_search_twice():

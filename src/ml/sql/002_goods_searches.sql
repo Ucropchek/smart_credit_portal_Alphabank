@@ -6,6 +6,7 @@ CREATE TABLE IF NOT EXISTS ml.goods_searches (
     application_id bigint PRIMARY KEY,
     amount numeric(15, 2) NOT NULL,
     categories jsonb NOT NULL,
+    purpose text,
     status text NOT NULL,
     results jsonb NOT NULL DEFAULT '[]'::jsonb,
     error text,
@@ -14,3 +15,5 @@ CREATE TABLE IF NOT EXISTS ml.goods_searches (
     CONSTRAINT ck_goods_searches_amount CHECK (amount > 0),
     CONSTRAINT ck_goods_searches_status CHECK (status IN ('queued', 'running', 'done', 'failed', 'no_categories'))
 );
+
+ALTER TABLE ml.goods_searches ADD COLUMN IF NOT EXISTS purpose text;

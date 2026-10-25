@@ -43,7 +43,7 @@ PLAN_SYSTEM = (
 JUDGE_SYSTEM = (
     "Ты проверяешь результаты поиска товаров. Для каждой страницы реши:\n"
     "is_offer — это страница конкретного товара, который можно купить (не каталог, не статья, не форум, не обзор);\n"
-    "relevant — товар соответствует ключевым словам;\n"
+    "relevant — товар соответствует ключевым словам и цели покупки, если она указана;\n"
     "name — краткое название товара;\n"
     "price_rub — цена в рублях ровно так, как она указана на странице или в описании; null, если цены нет;\n"
     "relevance — от 1 до 5, насколько товар подходит под запрос;\n"
@@ -54,7 +54,9 @@ JUDGE_SYSTEM = (
 CARD_SYSTEM = (
     "Ты проверяешь товары из каталогов интернет-магазинов. Название и цена уже известны. "
     "Для каждого товара по названию реши:\n"
-    "relevant — это тот же тип товара, что в ключевых словах, а не аксессуар, комплектующая или другой тип товара;\n"
+    "relevant — это тот же тип товара, что в ключевых словах, а не аксессуар, комплектующая или другой тип товара. "
+    "Если указана цель покупки, товар должен ей подходить: для сельхозтехники не подходит бытовая техника "
+    "с тем же словом в названии, для торгового оборудования — домашняя мебель;\n"
     "relevance — от 1 до 5: 5 — точно тот товар, 3 — подходит частично, 1 — почти не подходит.\n"
     "Отвечай только по переданным данным, используя index товара."
 )
@@ -165,7 +167,7 @@ class ProductSearcher:
         stats.fetched = sum(1 for candidate in candidates if candidate.facts is not None)
         candidates = self._expand_catalogs(candidates, stats)
 
-        verdicts = await self._judge_all(keywords, candidates, warnings)
+        verdicts = await self._judge_all(_context(keywords, purpose), candidates, warnings)
 
         priced: list[Offer] = []
         for index, candidate in enumerate(candidates):
@@ -321,7 +323,7 @@ class ProductSearcher:
         return expanded
 
     async def _judge_all(
-        self, keywords: str, candidates: list[_Candidate], warnings: list[str]
+        self, context: str, candidates: list[_Candidate], warnings: list[str]
     ) -> dict[int, _Verdict]:
         cards = [index for index, candidate in enumerate(candidates) if _is_priced_card(candidate)]
         card_set = set(cards)
@@ -332,7 +334,7 @@ class ProductSearcher:
         for start in range(0, len(pages), size):
             batch = pages[start : start + size]
             try:
-                verdicts.update(await self._judge(keywords, candidates, batch))
+                verdicts.update(await self._judge(context, candidates, batch))
             except LlmError as error:
                 warnings.append(f"Модель не разобрала страницы {batch[0]}–{batch[-1]}, взята только разметка ({error}).")
                 verdicts.update(_markup_verdicts(candidates, batch))
@@ -341,15 +343,15 @@ class ProductSearcher:
         for start in range(0, len(cards), size):
             batch = cards[start : start + size]
             try:
-                verdicts.update(await self._check_cards(keywords, candidates, batch))
+                verdicts.update(await self._check_cards(context, candidates, batch))
             except LlmError as error:
                 warnings.append(f"Модель не проверила карточки каталогов, взяты все по разметке ({error}).")
                 verdicts.update(_markup_verdicts(candidates, batch))
         return verdicts
 
-    async def _check_cards(self, keywords: str, candidates: list[_Candidate], batch: list[int]) -> dict[int, _Verdict]:
+    async def _check_cards(self, context: str, candidates: list[_Candidate], batch: list[int]) -> dict[int, _Verdict]:
         cards = [{"index": index, "name": candidates[index].facts.product_name} for index in batch]
-        prompt = f"Ключевые слова: {keywords}\nТовары:\n{json.dumps(cards, ensure_ascii=False)}"
+        prompt = f"{context}\nТовары:\n{json.dumps(cards, ensure_ascii=False)}"
         answer = await self.llm.ask_json(CARD_SYSTEM, prompt, CARD_SCHEMA)
 
         allowed = set(batch)
@@ -370,7 +372,7 @@ class ProductSearcher:
             )
         return verdicts
 
-    async def _judge(self, keywords: str, candidates: list[_Candidate], batch: list[int]) -> dict[int, _Verdict]:
+    async def _judge(self, context: str, candidates: list[_Candidate], batch: list[int]) -> dict[int, _Verdict]:
         pages = []
         for index in batch:
             candidate = candidates[index]
@@ -391,7 +393,7 @@ class ProductSearcher:
                     else "страница не загрузилась",
                 }
             )
-        prompt = f"Ключевые слова: {keywords}\nСтраницы:\n{json.dumps(pages, ensure_ascii=False)}"
+        prompt = f"{context}\nСтраницы:\n{json.dumps(pages, ensure_ascii=False)}"
         answer = await self.llm.ask_json(JUDGE_SYSTEM, prompt, JUDGE_SCHEMA)
 
         allowed = set(batch)
@@ -425,6 +427,13 @@ def _markup_verdicts(candidates: list[_Candidate], batch: list[int]) -> dict[int
                 reason="Модель недоступна: товар и цена взяты из разметки страницы.",
             )
     return verdicts
+
+
+def _context(keywords: str, purpose: str | None) -> str:
+    text = f"Ключевые слова: {keywords}"
+    if purpose and purpose.strip():
+        text += f"\nЦель покупки: {purpose.strip()[:500]}"
+    return text
 
 
 def _stems(keywords: str) -> list[str]:

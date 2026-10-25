@@ -41,6 +41,7 @@ class FakeLlm:
         self.fail_plan = fail_plan
         self.irrelevant_cards = set(irrelevant_cards)
         self.calls: list[tuple[str, list[int]]] = []
+        self.prompts: list[str] = []
 
     async def ask_json(self, system, user, schema):
         if "queries" in schema["properties"]:
@@ -50,8 +51,9 @@ class FakeLlm:
             return {"queries": self.queries}
         if self.fail_judge:
             raise LlmError("offline")
+        self.prompts.append(user)
         is_card_check = "is_offer" not in schema["properties"]["items"]["items"]["properties"]
-        listed = json.loads(user.split("\n", 2)[2])
+        listed = json.loads(user[user.index("\n[") + 1 :])
         indices = [item["index"] for item in listed]
         if is_card_check:
             self.calls.append(("cards", indices))
@@ -305,6 +307,39 @@ def test_catalog_cards_get_a_light_check_not_the_full_page_review():
     assert card.price_source == "catalog"
     assert card.relevance == 3
     assert "market.ru" in card.reason
+
+
+def test_loan_purpose_reaches_both_model_checks():
+    hits = {
+        "зерноуборочный комбайн купить": [
+            ("https://market.ru/category/combines", "Комбайны", ""),
+            ("https://agro.ru/combine-1", "Комбайн Акрос", "Цена 1 450 000 ₽"),
+        ]
+    }
+    pages = {
+        "https://market.ru/category/combines": catalog_page(
+            [("Кухонный комбайн Bosch", "/card/kitchen", 27316), ("Комбайн зерноуборочный Нива", "/card/niva", 1400000)]
+        )
+    }
+    llm = FakeLlm(["зерноуборочный комбайн купить"], [verdict(2, price=1450000)], irrelevant_cards={0})
+    searcher = ProductSearcher(SETTINGS, FakeSearch(hits), FakeFetcher(pages), llm)
+
+    result = asyncio.run(searcher.run("зерноуборочный комбайн", Decimal(1_500_000), "уборка подсолнечника на своих полях"))
+
+    assert [kind for kind, _ in llm.calls] == ["plan", "judge", "cards"]
+    assert all("Цель покупки: уборка подсолнечника на своих полях" in prompt for prompt in llm.prompts)
+    assert sorted(offer.url for offer in result.offers) == ["https://agro.ru/combine-1", "https://market.ru/card/niva"]
+
+
+def test_prompts_have_no_purpose_line_without_a_purpose():
+    hits = {Q1: [("https://shop.ru/p", "Витрина", "")]}
+    llm = FakeLlm([Q1], [verdict(0)])
+    asyncio.run(
+        ProductSearcher(SETTINGS, FakeSearch(hits), FakeFetcher({"https://shop.ru/p": product_page("1000")}), llm).run(
+            "холодильная витрина", Decimal(500_000)
+        )
+    )
+    assert llm.prompts and not any("Цель покупки" in prompt for prompt in llm.prompts)
 
 
 def test_model_queries_that_change_the_product_or_add_a_floor_are_dropped():
