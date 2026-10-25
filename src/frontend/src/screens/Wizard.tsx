@@ -283,7 +283,7 @@ export function Wizard({ initial, onSubmit }: { initial: LoanDraft; onSubmit: (n
   const [matchedPurpose, setMatchedPurpose] = useState<{ text: string; matches: PurposeMatch[]; failed: boolean } | null>(null)
   const [amount, setAmount] = useState(initial.amount)
   const [termMonths, setTermMonths] = useState(initial.termMonths)
-  const [inn, setInn] = useState('7701234567')
+  const [inn, setInn] = useState('7701990013')
   const [lookup, setLookup] = useState<LookupState>({ status: 'idle' })
   const [revenue, setRevenue] = useState('186 400 000')
   const [debt, setDebt] = useState('22 500 000')

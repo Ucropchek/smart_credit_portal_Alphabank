@@ -32,6 +32,7 @@ function AppFrame({
   scenario,
   draft,
   applicationNumber,
+  trackerLive,
   bankQueue,
   clientCount,
   focusNumber,
@@ -40,6 +41,7 @@ function AppFrame({
   onClientCount,
   onApply,
   onOpenApp,
+  onBackToList,
   onSubmitted,
   onRole,
   onScenario,
@@ -54,6 +56,7 @@ function AppFrame({
   scenario: Scenario
   draft: LoanDraft
   applicationNumber: number | null
+  trackerLive: boolean
   bankQueue: number | null
   clientCount: number | null
   focusNumber: number | null
@@ -62,6 +65,7 @@ function AppFrame({
   onClientCount: (count: number) => void
   onApply: (draft: LoanDraft) => void
   onOpenApp: (number: number) => void
+  onBackToList: () => void
   onSubmitted: (number: number) => void
   onRole: (r: Role) => void
   onScenario: (s: Scenario) => void
@@ -104,7 +108,13 @@ function AppFrame({
           )}
           {screen === 'tracker' && (
             <div className="mx-auto max-w-[1280px] px-8 py-8">
-              <Tracker scenario={scenario} applicationNumber={applicationNumber} />
+              <Tracker
+                scenario={scenario}
+                applicationNumber={applicationNumber}
+                live={trackerLive}
+                onOpen={onOpenApp}
+                onBack={onBackToList}
+              />
             </div>
           )}
           {screen === 'underwriter' && (
@@ -163,6 +173,7 @@ function Overview({
                     scenario={scenario}
                     draft={starter}
                     applicationNumber={null}
+                    trackerLive
                     bankQueue={null}
                     clientCount={null}
                     focusNumber={null}
@@ -171,6 +182,7 @@ function Overview({
                     onClientCount={noop}
                     onApply={noop}
                     onOpenApp={noop}
+                    onBackToList={noop}
                     onSubmitted={noop}
                     onRole={noop}
                     onScenario={noop}
@@ -194,6 +206,7 @@ export default function App() {
   const [overview, setOverview] = useState(false)
   const [draft, setDraft] = useState<LoanDraft>(starter)
   const [applicationNumber, setApplicationNumber] = useState<number | null>(null)
+  const [trackerLive, setTrackerLive] = useState(true)
   const [bankQueue, setBankQueue] = useState<number | null>(null)
   const [clientCount, setClientCount] = useState<number | null>(null)
   const [focusNumber, setFocusNumber] = useState<number | null>(null)
@@ -239,6 +252,7 @@ export default function App() {
       scenario={scenario}
       draft={draft}
       applicationNumber={applicationNumber}
+      trackerLive={trackerLive}
       bankQueue={bankQueue}
       clientCount={clientCount}
       focusNumber={focusNumber}
@@ -250,20 +264,34 @@ export default function App() {
         setScreen('wizard')
       }}
       onOpenApp={(number) => {
+        setTrackerLive(true)
         setApplicationNumber(number)
         setScreen('tracker')
       }}
+      onBackToList={() => {
+        setTrackerLive(true)
+        setApplicationNumber(null)
+        setScreen('tracker')
+      }}
       onSubmitted={(number) => {
+        setTrackerLive(true)
         setApplicationNumber(number)
         setScreen('tracker')
       }}
       onRole={switchRole}
       onScenario={(next) => {
         setScenario(next)
+        setTrackerLive(false)
         setApplicationNumber(null)
         if (role === 'client') setScreen('tracker')
       }}
-      go={setScreen}
+      go={(next) => {
+        if (next === 'tracker') {
+          setTrackerLive(true)
+          setApplicationNumber(null)
+        }
+        setScreen(next)
+      }}
       overview={overview}
       onOverview={() => setOverview(true)}
       onOpenNotice={(number) => {
@@ -272,6 +300,7 @@ export default function App() {
           setFocusTick((tick) => tick + 1)
           setScreen('underwriter')
         } else {
+          setTrackerLive(true)
           setApplicationNumber(number)
           setScreen('tracker')
         }

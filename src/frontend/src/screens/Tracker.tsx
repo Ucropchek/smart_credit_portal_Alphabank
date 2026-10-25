@@ -1,5 +1,5 @@
 import { useEffect, useState } from 'react'
-import { answerApplication, getApplication, purposeMatches, saveStatement, type ApplicationDetail } from '../api/applications'
+import { answerApplication, getApplication, listApplications, listStatus, purposeMatches, saveStatement, type ApplicationDetail, type ApplicationListItem } from '../api/applications'
 import { cx } from '../components/cx'
 import { DocumentsCard } from '../components/DocumentsCard'
 import { FinancesCard } from '../components/FinancesCard'
@@ -28,9 +28,102 @@ function Row({ k, v, delta }: { k: string; v: string; delta?: string }) {
   )
 }
 
-export function Tracker({ scenario, applicationNumber }: { scenario: Scenario; applicationNumber: number | null }) {
-  if (applicationNumber != null) return <LiveApplication number={applicationNumber} />
-  return <DemoTracker scenario={scenario} />
+const stepProgress: Record<string, number> = {
+  submitted: 1,
+  registryCheck: 2,
+  scoring: 3,
+  decision: 4,
+}
+
+export function Tracker({
+  scenario,
+  applicationNumber,
+  live,
+  onOpen,
+  onBack,
+}: {
+  scenario: Scenario
+  applicationNumber: number | null
+  live: boolean
+  onOpen: (number: number) => void
+  onBack: () => void
+}) {
+  if (!live && applicationNumber == null) return <DemoTracker scenario={scenario} />
+  if (applicationNumber == null) return <ApplicationList onOpen={onOpen} />
+  return <LiveApplication number={applicationNumber} onBack={onBack} />
+}
+
+function ApplicationList({ onOpen }: { onOpen: (number: number) => void }) {
+  const [rows, setRows] = useState<ApplicationListItem[] | null>(null)
+  const [failed, setFailed] = useState(false)
+
+  useEffect(() => {
+    let cancel = false
+    listApplications()
+      .then((list) => {
+        if (!cancel) setRows(list)
+      })
+      .catch(() => {
+        if (!cancel) setFailed(true)
+      })
+    return () => {
+      cancel = true
+    }
+  }, [])
+
+  return (
+    <div>
+      <h1 className="text-[32px] font-semibold tracking-[-0.025em] text-ink">Мои заявки</h1>
+      <p className="mt-2 text-sm text-muted">Выберите заявку, чтобы открыть статус и решение банка</p>
+      <Card className="mt-6 p-8">
+        {failed && <p className="text-sm text-ink">Не удалось загрузить заявки.</p>}
+        {!failed && rows == null && <p className="text-sm text-muted">Загружаем заявки…</p>}
+        {rows?.length === 0 && <p className="text-sm text-muted">Пока нет отправленных заявок.</p>}
+        {rows && rows.length > 0 && (
+          <div>
+            <div className="grid grid-cols-[1.1fr_2fr_1.1fr_0.8fr_2fr_1.3fr_32px] gap-4 border-b border-line pb-3 text-xs font-medium text-muted">
+              <span>Номер</span>
+              <span>Компания</span>
+              <span className="text-right">Сумма</span>
+              <span className="text-right">Срок</span>
+              <span>Этап конвейера</span>
+              <span>Статус</span>
+              <span />
+            </div>
+            {rows.map((app) => {
+              const progress = stepProgress[app.step] ?? 1
+              const status = listStatus(app.employeeDecision, app.stepTitle)
+              return (
+                <button
+                  key={app.number}
+                  type="button"
+                  onClick={() => onOpen(app.number)}
+                  className="grid w-full cursor-pointer grid-cols-[1.1fr_2fr_1.1fr_0.8fr_2fr_1.3fr_32px] items-center gap-4 border-b border-line py-4 text-left text-sm transition-colors last:border-0 hover:bg-canvas/50"
+                >
+                  <span className="tnum font-semibold text-ink">#{app.number}</span>
+                  <span className="text-ink">{app.businessName ?? 'Компания'}</span>
+                  <span className="tnum text-right font-medium text-ink">{rub(app.amount)}</span>
+                  <span className="tnum text-right text-ink">{app.termMonths} мес</span>
+                  <span className="flex items-center gap-1">
+                    {[1, 2, 3, 4].map((step) => (
+                      <span key={step} className={cx('h-1.5 flex-1 rounded-full', step <= progress ? 'bg-ink' : 'bg-line')} />
+                    ))}
+                    <span className="tnum ml-2 text-xs text-muted">{progress}/4</span>
+                  </span>
+                  <span>
+                    <Badge tone={status.tone} dot>
+                      {status.label}
+                    </Badge>
+                  </span>
+                  <Icon name="chevronRight" size={18} className="text-muted" />
+                </button>
+              )
+            })}
+          </div>
+        )}
+      </Card>
+    </div>
+  )
 }
 
 const liveStages = ['Заявка подана', 'Проверка ФНС и БКИ', 'Кредитный скоринг', 'Решение банка']
@@ -187,7 +280,7 @@ function parseMoney(text: string) {
   return Number.isFinite(value) ? value : null
 }
 
-function LiveApplication({ number }: { number: number }) {
+function LiveApplication({ number, onBack }: { number: number; onBack: () => void }) {
   const [loaded, setLoaded] = useState<{ number: number; detail: ApplicationDetail | null; failed: boolean } | null>(null)
   const [answers, setAnswers] = useState<Record<number, string>>({})
   const [answering, setAnswering] = useState<number | null>(null)
@@ -277,7 +370,10 @@ function LiveApplication({ number }: { number: number }) {
   return (
     <div className="space-y-6">
       <div>
-        <p className="tnum text-sm text-muted">Заявка #{number}</p>
+        <button type="button" onClick={onBack} className="cursor-pointer text-sm font-medium text-muted hover:text-ink">
+          Все заявки
+        </button>
+        <p className="tnum mt-3 text-sm text-muted">Заявка #{number}</p>
         <h1 className="mt-1 text-[32px] font-semibold tracking-[-0.025em] text-ink">
           {detail?.business.name ?? 'Статус заявки'}
         </h1>

@@ -97,7 +97,7 @@ export function Sidebar({
               <Icon name={item.icon} className={active ? 'text-alfa' : ''} />
               {item.label}
               {item.id === 'tracker' && applicationCount != null && (
-                <span className="tnum ml-auto grid size-5 place-items-center rounded-full bg-alfa text-[11px] font-semibold text-white">
+                <span className="tnum ml-auto rounded-md bg-canvas px-1.5 py-0.5 text-[11px] font-semibold text-muted">
                   {applicationCount}
                 </span>
               )}
@@ -127,11 +127,11 @@ export function Sidebar({
         {role === 'client' ? (
           <div className="flex items-center gap-3">
             <div className="grid size-10 shrink-0 place-items-center rounded-xl bg-ink text-sm font-semibold text-white">
-              ВЛ
+              ДА
             </div>
             <div className="min-w-0 leading-tight">
-              <div className="truncate text-sm font-semibold text-ink">ООО «Вектор Логистик»</div>
-              <div className="tnum mt-0.5 text-xs text-muted">ИНН 7701234567</div>
+              <div className="truncate text-sm font-semibold text-ink">ООО «Демо-альфа»</div>
+              <div className="tnum mt-0.5 text-xs text-muted">ИНН 7701990013</div>
             </div>
           </div>
         ) : (
