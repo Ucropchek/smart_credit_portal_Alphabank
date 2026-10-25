@@ -23,6 +23,12 @@ const monthNames = [
   'декабрь',
 ]
 
+export function ruDate(iso: string | null | undefined) {
+  if (!iso) return ''
+  const [year, month, day] = iso.split('-')
+  return day && month && year ? `${day}.${month}.${year}` : iso
+}
+
 export function monthLabel(yyyyMm: string) {
   const [yearText, monthText] = yyyyMm.split('-')
   const year = Number(yearText)

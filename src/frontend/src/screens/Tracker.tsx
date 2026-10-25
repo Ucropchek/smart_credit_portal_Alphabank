@@ -461,6 +461,7 @@ function LiveApplication({ number, onBack }: { number: number; onBack: () => voi
             <FinancesCard
               finances={detail.finances}
               amount={detail.amount}
+              registry={detail.registries?.fns}
               subtitle="Цифры, которые вы указали при подаче"
             />
           )}

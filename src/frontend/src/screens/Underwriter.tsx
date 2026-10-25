@@ -18,7 +18,7 @@ import { DocumentsCard } from '../components/DocumentsCard'
 import { FinancesCard } from '../components/FinancesCard'
 import { GoodsCard } from '../components/GoodsCard'
 import { Badge, Button, Card, CardHeader, KV } from '../components/ui'
-import { monthLabel, months, rub } from '../format'
+import { monthLabel, months, rub, ruDate } from '../format'
 
 const decisionLabel: Record<string, string> = {
   approve: 'Одобрение',
@@ -119,6 +119,21 @@ function RegistryFacts({ registries }: { registries: RegistrySnapshot }) {
         <KV k="Банкротство" v={bankruptcy} />
         <KV k="Залог" v={registries.fedresurs.pledgeActive ? 'Есть' : 'Нет'} />
         <KV k="Иски к ответчику" v={`${registries.arbitration.openDefendantCases} · ${rub(registries.arbitration.openClaimSum)}`} mono />
+        {typeof registries.fns.revenue === 'number' && (
+          <KV
+            k="Доходы по ФНС"
+            v={`${rub(registries.fns.revenue)}${registries.fns.revenueDate ? ` · ${ruDate(registries.fns.revenueDate)}` : ''}`}
+            mono
+          />
+        )}
+        {typeof registries.fns.expenses === 'number' && <KV k="Расходы по ФНС" v={rub(registries.fns.expenses)} mono />}
+        {typeof registries.fns.employeeCount === 'number' && (
+          <KV
+            k="Численность по ФНС"
+            v={`${registries.fns.employeeCount.toLocaleString('ru-RU')}${registries.fns.employeeCountDate ? ` · ${ruDate(registries.fns.employeeCountDate)}` : ''}`}
+            mono
+          />
+        )}
         <KV k="Налоговая задолженность" v={registries.fns.arrearsTotal == null ? 'Нет данных' : rub(registries.fns.arrearsTotal)} mono />
         <KV k="Блокировка счёта" v={registries.fns.accountBlocked == null ? 'Нет данных' : registries.fns.accountBlocked ? 'Есть' : 'Нет'} />
         <KV k="БКИ" v={bki} />
@@ -501,7 +516,12 @@ export function Underwriter({
                 <FinancesCard
                   finances={detail.finances}
                   amount={detail.amount}
-                  subtitle="Клиент указал их при подаче. Реестр эти цифры не подтверждал"
+                  registry={detail.registries?.fns}
+                  subtitle={
+                    typeof detail.registries?.fns.revenue === 'number'
+                      ? 'Рядом — доходы и численность из снимка ФНС'
+                      : 'Клиент указал их при подаче. Доходы ФНС появятся после обновления снимка реестров'
+                  }
                 />
               )}
 
