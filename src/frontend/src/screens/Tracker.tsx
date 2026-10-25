@@ -1,5 +1,5 @@
 import { useEffect, useState } from 'react'
-import { getApplication, type ApplicationDetail } from '../api/applications'
+import { answerApplication, getApplication, type ApplicationDetail } from '../api/applications'
 import { cx } from '../components/cx'
 import { Icon } from '../components/Icon'
 import type { Scenario } from '../components/Shell'
@@ -40,6 +40,9 @@ const clientDecision: Record<string, { title: string; short: string }> = {
 
 function LiveApplication({ number }: { number: number }) {
   const [loaded, setLoaded] = useState<{ number: number; detail: ApplicationDetail | null; failed: boolean } | null>(null)
+  const [answers, setAnswers] = useState<Record<number, string>>({})
+  const [answering, setAnswering] = useState<number | null>(null)
+  const [answerError, setAnswerError] = useState<string | null>(null)
 
   useEffect(() => {
     let cancel = false
@@ -60,6 +63,26 @@ function LiveApplication({ number }: { number: number }) {
   const failed = current?.failed ?? false
   const active = detail ? Math.max(0, ['submitted', 'registryCheck', 'scoring', 'decision'].indexOf(detail.step)) : 0
   const verdict = detail?.employeeDecision ? clientDecision[detail.employeeDecision.outcome] : undefined
+
+  const sendAnswer = async (requestId: number) => {
+    const text = answers[requestId]?.trim() ?? ''
+    if (!text) {
+      setAnswerError('Напишите ответ')
+      return
+    }
+    setAnswering(requestId)
+    setAnswerError(null)
+    try {
+      await answerApplication(number, requestId, text)
+      const app = await getApplication(number)
+      setLoaded({ number, detail: app, failed: false })
+      setAnswers((current) => ({ ...current, [requestId]: '' }))
+    } catch (error) {
+      setAnswerError(error instanceof Error ? error.message : 'Не удалось отправить ответ')
+    } finally {
+      setAnswering(null)
+    }
+  }
 
   return (
     <div className="space-y-6">
@@ -127,6 +150,45 @@ function LiveApplication({ number }: { number: number }) {
               })}
             </div>
           </Card>
+
+          {(detail.requests?.length ?? 0) > 0 && (
+            <Card className="p-8">
+              <CardHeader title="Банк запросил уточнение" subtitle="Ответ сохранится в заявке" />
+              <ul className="mt-6 space-y-5">
+                {detail.requests?.map((request) => (
+                  <li key={request.id} className="rounded-xl border border-line px-4 py-4">
+                    <div className="text-sm font-medium text-ink">{request.text}</div>
+                    {request.open ? (
+                      <div className="mt-3">
+                        <textarea
+                          value={answers[request.id] ?? ''}
+                          maxLength={2000}
+                          rows={3}
+                          onChange={(event) => {
+                            setAnswers((current) => ({ ...current, [request.id]: event.target.value }))
+                            setAnswerError(null)
+                          }}
+                          className="w-full resize-y rounded-xl border border-line bg-white px-4 py-3 text-sm text-ink outline-none focus:border-ink"
+                          placeholder="Ответ банку"
+                        />
+                        <Button
+                          type="button"
+                          className="mt-3"
+                          onClick={() => sendAnswer(request.id)}
+                          disabled={answering === request.id}
+                        >
+                          {answering === request.id ? 'Отправляем…' : 'Ответить'}
+                        </Button>
+                      </div>
+                    ) : (
+                      <p className="mt-2 text-sm text-ink">{request.answer}</p>
+                    )}
+                  </li>
+                ))}
+              </ul>
+              {answerError && <p className="mt-3 text-sm text-alfa">{answerError}</p>}
+            </Card>
+          )}
 
           <Card className="p-8">
             <CardHeader title={verdict?.title ?? detail.stepTitle} subtitle={detail.purpose} />

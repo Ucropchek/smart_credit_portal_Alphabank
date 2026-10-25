@@ -440,6 +440,7 @@ static class ApplicationRoutes
         var names = await BusinessNamesAsync(dataSource, [registrationId]);
         names.TryGetValue(registrationId, out var business);
         var openRequests = await OpenRequestsAsync(dataSource, number);
+        var requests = await RequestsAsync(dataSource, number);
         var turnover = statementConsent == true ? await TurnoverAsync(dataSource, number) : [];
 
         JsonNode? score = scoreJson is null ? null : JsonNode.Parse(scoreJson);
@@ -472,7 +473,8 @@ static class ApplicationRoutes
                 @checked = bkiChecked,
                 changedAt = bkiCheckedAt
             },
-            ["openRequests"] = openRequests
+            ["openRequests"] = openRequests,
+            ["requests"] = requests
         };
 
         if (registryChecked)
@@ -592,6 +594,34 @@ static class ApplicationRoutes
                 text = reader.GetString(1),
                 askedAt = reader.GetFieldValue<DateTimeOffset>(2),
                 open = true
+            });
+        }
+        return rows;
+    }
+
+    static async Task<List<object>> RequestsAsync(NpgsqlDataSource dataSource, long number)
+    {
+        var rows = new List<object>();
+        await using var command = dataSource.CreateCommand(
+            """
+            select id, question, answer, asked_at, answered_at
+            from portal.information_requests
+            where application_id = @id
+            order by id
+            """);
+        command.Parameters.AddWithValue("id", number);
+        await using var reader = await command.ExecuteReaderAsync();
+        while (await reader.ReadAsync())
+        {
+            DateTimeOffset? answeredAt = reader.IsDBNull(4) ? null : reader.GetFieldValue<DateTimeOffset>(4);
+            rows.Add(new
+            {
+                id = reader.GetInt64(0),
+                text = reader.GetString(1),
+                answer = reader.IsDBNull(2) ? null : reader.GetString(2),
+                askedAt = reader.GetFieldValue<DateTimeOffset>(3),
+                answeredAt,
+                open = answeredAt is null
             });
         }
         return rows;

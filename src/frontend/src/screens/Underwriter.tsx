@@ -1,5 +1,6 @@
 import { useEffect, useRef, useState } from 'react'
 import {
+  askApplication,
   decideApplication,
   getApplication,
   listApplications,
@@ -43,6 +44,8 @@ const outcomes = [
 
 type Outcome = (typeof outcomes)[number]['id']
 
+const questionPresets = ['Выписка по счёту за последний квартал', 'Договоры с основными контрагентами']
+
 function savedOutcome(app: ApplicationDetail): Outcome {
   const outcome = app.employeeDecision?.outcome
   if (outcome === 'approve' || outcome === 'review' || outcome === 'reject') return outcome
@@ -60,6 +63,9 @@ export function Underwriter({ onCount }: { onCount?: (count: number) => void }) 
   const [reason, setReason] = useState('')
   const [deciding, setDeciding] = useState(false)
   const [decisionError, setDecisionError] = useState<string | null>(null)
+  const [question, setQuestion] = useState('')
+  const [asking, setAsking] = useState(false)
+  const [askError, setAskError] = useState<string | null>(null)
   const onCountRef = useRef(onCount)
 
   useEffect(() => {
@@ -157,6 +163,25 @@ export function Underwriter({ onCount }: { onCount?: (count: number) => void }) 
     }
   }
 
+  const ask = async () => {
+    if (selected == null) return
+    if (!question.trim()) {
+      setAskError('Напишите вопрос')
+      return
+    }
+    setAsking(true)
+    setAskError(null)
+    try {
+      await askApplication(selected, question)
+      setLoaded(await getApplication(selected, 'bank'))
+      setQuestion('')
+    } catch (error) {
+      setAskError(error instanceof Error ? error.message : 'Не удалось отправить вопрос')
+    } finally {
+      setAsking(false)
+    }
+  }
+
   return (
     <div className="space-y-6">
       <div>
@@ -232,6 +257,56 @@ export function Underwriter({ onCount }: { onCount?: (count: number) => void }) 
                     }
                   />
                 </div>
+              </Card>
+
+              <Card className="p-8">
+                <CardHeader title="Уточнения клиенту" subtitle="Вопрос увидит предприниматель в статусе заявки" />
+                <ul className="mt-6 space-y-4">
+                  {detail.requests?.map((request) => (
+                    <li key={request.id} className="rounded-xl border border-line px-4 py-3">
+                      <div className="text-sm font-medium text-ink">{request.text}</div>
+                      {request.answer ? (
+                        <p className="mt-2 text-sm text-ink">{request.answer}</p>
+                      ) : (
+                        <p className="mt-2 text-sm text-muted">Ждём ответ клиента</p>
+                      )}
+                    </li>
+                  ))}
+                </ul>
+                {(detail.requests?.length ?? 0) === 0 && <p className="mt-4 text-sm text-muted">Вопросов пока нет</p>}
+                <div className="mt-5 flex flex-wrap gap-2">
+                  {questionPresets.map((preset) => (
+                    <button
+                      key={preset}
+                      type="button"
+                      onClick={() => {
+                        setQuestion(preset)
+                        setAskError(null)
+                      }}
+                      className="h-9 cursor-pointer rounded-full border border-line px-3 text-xs font-medium text-ink hover:bg-canvas"
+                    >
+                      {preset}
+                    </button>
+                  ))}
+                </div>
+                <label className="mt-4 block">
+                  <span className="text-sm font-medium text-ink">Вопрос</span>
+                  <textarea
+                    value={question}
+                    maxLength={2000}
+                    rows={3}
+                    onChange={(event) => {
+                      setQuestion(event.target.value)
+                      setAskError(null)
+                    }}
+                    className="mt-2 w-full resize-y rounded-xl border border-line bg-white px-4 py-3 text-sm text-ink outline-none focus:border-ink"
+                    placeholder="Что нужно уточнить у клиента"
+                  />
+                </label>
+                <Button type="button" className="mt-4" onClick={ask} disabled={asking}>
+                  {asking ? 'Отправляем…' : 'Спросить клиента'}
+                </Button>
+                {askError && <p className="mt-3 text-sm text-alfa">{askError}</p>}
               </Card>
 
               <Card className="p-8">

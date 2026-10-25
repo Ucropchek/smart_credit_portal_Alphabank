@@ -88,6 +88,16 @@ export type ApplicationDetail = {
     reason: string | null
     decidedAt: string | null
   }
+  requests?: InformationRequest[]
+}
+
+export type InformationRequest = {
+  id: number
+  text: string
+  answer: string | null
+  askedAt: string
+  answeredAt: string | null
+  open: boolean
 }
 
 export async function createApplication(
@@ -154,6 +164,32 @@ export async function decideApplication(
     throw new Error(message)
   }
   return body
+}
+
+export async function askApplication(number: number, text: string): Promise<void> {
+  const response = await fetch(`/applications/${number}/requests`, {
+    method: 'POST',
+    headers: { 'content-type': 'application/json' },
+    body: JSON.stringify({ text: text.trim() }),
+    signal: AbortSignal.timeout(8000),
+  })
+  if (!response.ok) throw new Error(await errorText(response, 'Не удалось отправить вопрос'))
+}
+
+export async function answerApplication(number: number, requestId: number, text: string): Promise<void> {
+  const response = await fetch(`/applications/${number}/requests/${requestId}/answer`, {
+    method: 'POST',
+    headers: { 'content-type': 'application/json' },
+    body: JSON.stringify({ text: text.trim() }),
+    signal: AbortSignal.timeout(8000),
+  })
+  if (!response.ok) throw new Error(await errorText(response, 'Не удалось отправить ответ'))
+}
+
+async function errorText(response: Response, fallback: string) {
+  const body: unknown = await response.json().catch(() => null)
+  if (body && typeof body === 'object' && 'error' in body && typeof body.error === 'string') return body.error
+  return fallback
 }
 
 function isCreated(value: unknown): value is CreatedApplication {
