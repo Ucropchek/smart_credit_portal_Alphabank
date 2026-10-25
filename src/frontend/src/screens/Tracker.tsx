@@ -39,6 +39,53 @@ const clientDecision: Record<string, { title: string; short: string }> = {
   reject: { title: 'Банк отказал в кредите', short: 'Отказ' },
 }
 
+const productLabel: Record<string, string> = {
+  ordinary: 'Обычный кредит',
+  'msp-subsidized': 'Льготный кредит МСП',
+}
+
+function ScoreLimit({
+  requestedAmount,
+  product,
+  counter,
+}: {
+  requestedAmount: number
+  product: NonNullable<ApplicationDetail['product']>
+  counter: NonNullable<ApplicationDetail['counterOffer']>
+}) {
+  const covered = counter.amount >= requestedAmount && counter.amount > 0
+  const empty = counter.amount <= 0
+  const title = covered ? 'Запрошенная сумма входит в лимит' : 'Лимит по скорингу'
+  const subtitle = covered
+    ? 'Сумма заявки не выше лимита, который даёт балл'
+    : empty
+      ? 'По текущему баллу лимит нулевой, запрошенная сумма в него не входит'
+      : 'В лимит входит меньшая сумма, чем в заявке'
+
+  return (
+    <Card className="p-8">
+      <CardHeader title={title} subtitle={subtitle} />
+      <dl className="mt-6 grid grid-cols-3 gap-x-10 gap-y-4 text-sm">
+        <div>
+          <dt className="text-muted">Продукт</dt>
+          <dd className="mt-1 text-lg font-semibold text-ink">{productLabel[product.code] ?? product.code}</dd>
+        </div>
+        <div>
+          <dt className="text-muted">Лимит по баллу</dt>
+          <dd className="tnum mt-1 text-lg font-semibold text-ink">{rub(product.maxAmount)}</dd>
+        </div>
+        <div>
+          <dt className="text-muted">К выдаче</dt>
+          <dd className="tnum mt-1 text-lg font-semibold text-ink">
+            {rub(counter.amount)}
+            <span className="text-sm font-medium text-muted"> · {months(counter.termMonths)}</span>
+          </dd>
+        </div>
+      </dl>
+    </Card>
+  )
+}
+
 type TurnoverDraft = { month: string; incoming: string; outgoing: string }
 
 const exampleIncoming = [16_000_000, 15_500_000, 16_500_000, 17_000_000, 15_000_000, 16_000_000]
@@ -322,6 +369,10 @@ function LiveApplication({ number }: { number: number }) {
               <p className="mt-6 text-sm text-muted">Заявка принята. Банк ещё не начал проверку реестров и скоринг.</p>
             )}
           </Card>
+
+          {detail.product && detail.counterOffer && (
+            <ScoreLimit requestedAmount={detail.amount} product={detail.product} counter={detail.counterOffer} />
+          )}
         </>
       )}
     </div>
