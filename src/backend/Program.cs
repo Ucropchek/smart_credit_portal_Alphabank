@@ -614,6 +614,11 @@ app.MapGet("/businesses/{registrationId}", async (string registrationId, NpgsqlD
     }
 
     decimal? arrearsTotal = null;
+    decimal? revenue = null;
+    string? revenueDate = null;
+    decimal? expenses = null;
+    int? employeeCount = null;
+    string? employeeCountDate = null;
     var disqualified = false;
     var hasBailiffDebt = false;
     if (isLegalEntity)
@@ -621,7 +626,8 @@ app.MapGet("/businesses/{registrationId}", async (string registrationId, NpgsqlD
         var orgCardFound = false;
         await using (var command = dataSource.CreateCommand(
             """
-            select arrears_total, has_disqualified_manager, has_bailiff_debt
+            select arrears_total, has_disqualified_manager, has_bailiff_debt,
+                   revenue, revexp_date, expenses, employee_count, headcount_date
             from fns.v_org_card
             where inn = @inn
             """))
@@ -634,6 +640,11 @@ app.MapGet("/businesses/{registrationId}", async (string registrationId, NpgsqlD
                 arrearsTotal = reader.IsDBNull(0) ? null : reader.GetDecimal(0);
                 disqualified = reader.GetBoolean(1);
                 hasBailiffDebt = reader.GetBoolean(2);
+                revenue = reader.IsDBNull(3) ? null : reader.GetDecimal(3);
+                revenueDate = DateText(reader, 4);
+                expenses = reader.IsDBNull(5) ? null : reader.GetDecimal(5);
+                employeeCount = reader.IsDBNull(6) ? null : reader.GetInt32(6);
+                employeeCountDate = DateText(reader, 7);
             }
         }
 
@@ -776,6 +787,11 @@ app.MapGet("/businesses/{registrationId}", async (string registrationId, NpgsqlD
     var fns = new
     {
         arrearsTotal,
+        revenue,
+        revenueDate,
+        expenses,
+        employeeCount,
+        employeeCountDate,
         disqualified,
         massLeader,
         massFounder,

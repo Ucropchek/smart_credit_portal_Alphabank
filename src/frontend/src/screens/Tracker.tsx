@@ -59,15 +59,24 @@ function ApplicationList({ onOpen }: { onOpen: (number: number) => void }) {
 
   useEffect(() => {
     let cancel = false
-    listApplications()
-      .then((list) => {
-        if (!cancel) setRows(list)
-      })
-      .catch(() => {
-        if (!cancel) setFailed(true)
-      })
+    let seen = false
+    const load = () => {
+      listApplications()
+        .then((list) => {
+          if (cancel) return
+          seen = true
+          setFailed(false)
+          setRows(list)
+        })
+        .catch(() => {
+          if (!cancel && !seen) setFailed(true)
+        })
+    }
+    load()
+    const timer = window.setInterval(load, 8000)
     return () => {
       cancel = true
+      window.clearInterval(timer)
     }
   }, [])
 
@@ -292,15 +301,23 @@ function LiveApplication({ number, onBack }: { number: number; onBack: () => voi
 
   useEffect(() => {
     let cancel = false
-    getApplication(number)
-      .then((app) => {
-        if (!cancel) setLoaded({ number, detail: app, failed: false })
-      })
-      .catch(() => {
-        if (!cancel) setLoaded({ number, detail: null, failed: true })
-      })
+    let seen = false
+    const load = () => {
+      getApplication(number)
+        .then((app) => {
+          if (cancel) return
+          seen = true
+          setLoaded({ number, detail: app, failed: false })
+        })
+        .catch(() => {
+          if (!cancel && !seen) setLoaded({ number, detail: null, failed: true })
+        })
+    }
+    load()
+    const timer = window.setInterval(load, 5000)
     return () => {
       cancel = true
+      window.clearInterval(timer)
     }
   }, [number])
 

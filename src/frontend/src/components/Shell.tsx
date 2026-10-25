@@ -276,15 +276,23 @@ export function Header({
 
   useEffect(() => {
     let cancel = false
-    listApplications()
-      .then((list) => {
-        if (!cancel) setRows(list)
-      })
-      .catch(() => {
-        if (!cancel) setRows([])
-      })
+    let seen = false
+    const load = () => {
+      listApplications()
+        .then((list) => {
+          if (cancel) return
+          seen = true
+          setRows(list)
+        })
+        .catch(() => {
+          if (!cancel && !seen) setRows([])
+        })
+    }
+    load()
+    const timer = window.setInterval(load, 8000)
     return () => {
       cancel = true
+      window.clearInterval(timer)
     }
   }, [role, open])
   return (

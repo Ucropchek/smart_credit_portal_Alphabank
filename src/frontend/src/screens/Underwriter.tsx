@@ -164,7 +164,7 @@ function PurposeFacts({ detail }: { detail: ApplicationDetail }) {
         </ul>
       ) : (
         <p className="mt-4 text-sm text-muted">
-          {checked ? 'По тексту цели конкретные категории не нашлись.' : 'Категории появятся после проверки реестров или скоринга.'}
+          {checked ? 'По тексту цели конкретные категории не нашлись.' : 'Категории появятся, когда по заявке запустится поиск товаров.'}
         </p>
       )}
     </Card>
@@ -245,6 +245,7 @@ export function Underwriter({
   const [checking, setChecking] = useState(false)
   const [checkError, setCheckError] = useState<string | null>(null)
   const onCountRef = useRef(onCount)
+  const busy = useRef(false)
 
   useEffect(() => {
     onCountRef.current = onCount
@@ -272,21 +273,43 @@ export function Underwriter({
   useEffect(() => {
     if (selected == null) return
     let cancel = false
+    let seen = false
+    const rememberQuiet = (app: ApplicationDetail) => {
+      seen = true
+      setLoaded(app)
+      setErrorFor(null)
+      setRows((current) =>
+        current?.map((row) =>
+          row.number === app.number
+            ? { ...row, step: app.step, stepTitle: app.stepTitle, employeeDecision: app.employeeDecision?.outcome ?? null }
+            : row,
+        ) ?? current,
+      )
+    }
     getApplication(selected, 'bank')
       .then((app) => {
-        if (!cancel) {
-          setLoaded(app)
-          setErrorFor(null)
-          setOutcome(savedOutcome(app))
-          setReason(app.employeeDecision?.reason ?? '')
-          setDecisionError(null)
-        }
+        if (cancel) return
+        rememberQuiet(app)
+        setOutcome(savedOutcome(app))
+        setReason(app.employeeDecision?.reason ?? '')
+        setDecisionError(null)
       })
       .catch(() => {
-        if (!cancel) setErrorFor(selected)
+        if (!cancel && !seen) setErrorFor(selected)
       })
+    const timer = window.setInterval(() => {
+      if (busy.current) return
+      getApplication(selected, 'bank')
+        .then((app) => {
+          if (!cancel) rememberQuiet(app)
+        })
+        .catch(() => {
+          if (!cancel && !seen) setErrorFor(selected)
+        })
+    }, 5000)
     return () => {
       cancel = true
+      window.clearInterval(timer)
     }
   }, [selected])
 
@@ -309,6 +332,7 @@ export function Underwriter({
 
   const score = async () => {
     if (selected == null) return
+    busy.current = true
     setScoring(true)
     setScoreError(null)
     try {
@@ -324,6 +348,7 @@ export function Underwriter({
     } catch (error) {
       setScoreError(error instanceof Error ? error.message : 'Не удалось посчитать скоринг')
     } finally {
+      busy.current = false
       setScoring(false)
     }
   }
@@ -338,6 +363,7 @@ export function Underwriter({
       setDecisionError('Напишите причину отказа')
       return
     }
+    busy.current = true
     setDeciding(true)
     setDecisionError(null)
     try {
@@ -345,6 +371,7 @@ export function Underwriter({
     } catch (error) {
       setDecisionError(error instanceof Error ? error.message : 'Не удалось записать решение')
     } finally {
+      busy.current = false
       setDeciding(false)
     }
   }
@@ -355,6 +382,7 @@ export function Underwriter({
       setAskError('Напишите вопрос')
       return
     }
+    busy.current = true
     setAsking(true)
     setAskError(null)
     try {
@@ -364,12 +392,14 @@ export function Underwriter({
     } catch (error) {
       setAskError(error instanceof Error ? error.message : 'Не удалось отправить вопрос')
     } finally {
+      busy.current = false
       setAsking(false)
     }
   }
 
   const check = async () => {
     if (selected == null) return
+    busy.current = true
     setChecking(true)
     setCheckError(null)
     try {
@@ -385,6 +415,7 @@ export function Underwriter({
     } catch (error) {
       setCheckError(error instanceof Error ? error.message : 'Не удалось проверить реестры')
     } finally {
+      busy.current = false
       setChecking(false)
     }
   }

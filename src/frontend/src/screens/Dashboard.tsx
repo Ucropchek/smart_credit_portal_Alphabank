@@ -104,19 +104,26 @@ export function Dashboard({
 
   useEffect(() => {
     let cancel = false
-    listApplications()
-      .then((rows) => {
-        if (cancel) return
-        setSaved(rows)
-        onCountRef.current?.(rows.length)
-      })
-      .catch(() => {
-        if (cancel) return
-        setSaved([])
-        onCountRef.current?.(0)
-      })
+    let seen = false
+    const load = () => {
+      listApplications()
+        .then((rows) => {
+          if (cancel) return
+          seen = true
+          setSaved(rows)
+          onCountRef.current?.(rows.length)
+        })
+        .catch(() => {
+          if (cancel || seen) return
+          setSaved([])
+          onCountRef.current?.(0)
+        })
+    }
+    load()
+    const timer = window.setInterval(load, 8000)
     return () => {
       cancel = true
+      window.clearInterval(timer)
     }
   }, [])
 
@@ -225,7 +232,7 @@ export function Dashboard({
           </div>
 
           <ul className="mt-6 space-y-2.5 text-sm text-ink">
-            {[rec.time, 'Данные компании заполним автоматически', 'Подписание через ЭЦП онлайн'].map((item) => (
+            {[rec.time, 'Данные компании заполним из реестра', 'Подбор товаров под сумму кредита'].map((item) => (
               <li key={item} className="flex items-center gap-2.5">
                 <Icon name="check" size={16} className="text-ok" strokeWidth={2.25} />
                 {item}

@@ -18,6 +18,11 @@ export type MspProfile = {
 
 export type FnsProfile = {
   arrearsTotal: number | null
+  revenue?: number | null
+  revenueDate?: string | null
+  expenses?: number | null
+  employeeCount?: number | null
+  employeeCountDate?: string | null
   disqualified: boolean
   massLeader: boolean
   massFounder: boolean
