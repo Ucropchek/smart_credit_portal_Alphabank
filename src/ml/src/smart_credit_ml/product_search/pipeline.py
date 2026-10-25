@@ -23,6 +23,7 @@ from smart_credit_ml.product_search.web import PageFetcher, WebSearch
 
 _TRACKING = ("utm_", "yclid", "gclid", "fbclid", "_openstat")
 _LOWER_BOUND = re.compile(r"\bот\s*\d|\d\s*[-–—]\s*\d", re.IGNORECASE)
+_PAYMENT_WORDS = re.compile(r"кредит|рассроч|займ|заем|заём|лизинг|ипотек", re.IGNORECASE)
 
 PLAN_SYSTEM = (
     "Ты помогаешь предпринимателю найти товар, который он купит на кредит. "
@@ -33,8 +34,10 @@ PLAN_SYSTEM = (
     "2. Не добавляй уточнений, которых нет в ключевых словах и цели: «игровой», «для работы», бренды, модели.\n"
     "3. Цену указывай только как верхнюю границу: «до N рублей», где N — бюджет. "
     "Никогда не пиши нижнюю границу («от N»), диапазоны и другие суммы.\n"
-    "4. Добавляй слова «купить» или «цена». Не пиши ссылки и названия сайтов.\n"
-    "5. Запросы должны отличаться формулировкой, а не товаром."
+    "4. Не пиши про способ оплаты: никаких слов «кредит», «в кредит», «рассрочка», «заём», «лизинг». "
+    "Деньги уже есть, ищется сам товар в магазине.\n"
+    "5. Добавляй слова «купить» или «цена». Не пиши ссылки и названия сайтов.\n"
+    "6. Запросы должны отличаться формулировкой, а не товаром."
 )
 
 JUDGE_SYSTEM = (
@@ -232,12 +235,18 @@ class ProductSearcher:
             query = query.strip()[:200]
             if query in queries:
                 continue
-            if _LOWER_BOUND.search(query) or not all(stem in query.lower().replace("ё", "е") for stem in stems):
+            if (
+                _LOWER_BOUND.search(query)
+                or _PAYMENT_WORDS.search(query)
+                or not all(stem in query.lower().replace("ё", "е") for stem in stems)
+            ):
                 rejected.append(query)
                 continue
             queries.append(query)
         if rejected:
-            warnings.append(f"Отброшены запросы модели, уходящие от товара или с нижней границей цены: {rejected}")
+            warnings.append(
+                f"Отброшены запросы модели, уходящие от товара, с нижней границей цены или про кредит: {rejected}"
+            )
         return queries[: self.settings.max_queries] or fallback
 
     async def _collect(self, queries: list[str], warnings: list[str]) -> list[_Candidate]:

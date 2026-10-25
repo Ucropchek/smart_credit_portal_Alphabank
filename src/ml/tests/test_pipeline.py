@@ -314,6 +314,9 @@ def test_model_queries_that_change_the_product_or_add_a_floor_are_dropped():
             "холодильная витрина купить от 100000 рублей",
             "холодильная витрина 50000-80000 рублей",
             "холодильник купить",
+            "покупка холодильной витрины в кредит",
+            "холодильная витрина в рассрочку",
+            "холодильная витрина лизинг",
             "витрина холодильная цена до 500000 рублей",
         ],
         [],
@@ -321,7 +324,8 @@ def test_model_queries_that_change_the_product_or_add_a_floor_are_dropped():
     search = FakeSearch({})
     result = run(ProductSearcher(SETTINGS, search, FakeFetcher({}), llm))
     assert result.queries == ["витрина холодильная цена до 500000 рублей"]
-    assert any("Отброшены" in warning and "ноутбук" in warning for warning in result.warnings)
+    rejected = next(warning for warning in result.warnings if "Отброшены" in warning)
+    assert "ноутбук" in rejected and "в кредит" in rejected and "рассрочку" in rejected and "лизинг" in rejected
 
     only_bad = FakeLlm(["ноутбук купить", "витрина от 1000 рублей"], [])
     result = run(ProductSearcher(SETTINGS, FakeSearch({}), FakeFetcher({}), only_bad))
