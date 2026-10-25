@@ -5,4 +5,15 @@ import { defineConfig } from 'vite'
 // https://vite.dev/config/
 export default defineConfig({
   plugins: [react(), tailwindcss()],
+  server: {
+    proxy: {
+      '/companies': 'http://localhost:8080',
+      '/businesses': 'http://localhost:8080',
+      '/bki-consent': {
+        target: 'http://localhost:8080',
+        ws: true,
+      },
+      '/applications': 'http://localhost:8080',
+    },
+  },
 })

@@ -1,7 +1,12 @@
 import { useRef, useState } from 'react'
+import { createApplication, type LoanDraft } from '../api/applications'
+import { useBkiConsent } from '../api/bkiConsent'
+import { lookupBusiness, mspProfile, registrationId, type BusinessCard, type BkiObligation } from '../api/businesses'
+import { entrepreneurName, hasRegistryRecord, lookupCompany, type CompanyLookup } from '../api/companies'
 import { cx } from '../components/cx'
+import { annuity, months, rub } from '../format'
 import { Icon } from '../components/Icon'
-import { Badge, Button, Card, CardHeader, Field, KV, inputCls } from '../components/ui'
+import { Badge, Button, Card, CardHeader, Field, KV, Slider, inputCls } from '../components/ui'
 
 type Doc = { name: string; size: string; kind: string; state: 'ok' | 'checking' }
 
@@ -45,9 +50,216 @@ const numFmt = (value: string) => {
   return digits ? new Intl.NumberFormat('ru-RU').format(Number(digits)) : ''
 }
 
-export function Wizard({ onSubmit }: { onSubmit: () => void }) {
+type LookupState =
+  | { status: 'idle' }
+  | { status: 'loading' }
+  | { status: 'error' }
+  | { status: 'empty' }
+  | { status: 'ready'; company: CompanyLookup; profile: BusinessCard | null; profileFailed: boolean }
+
+const mspCategory: Record<string, string> = {
+  '1': 'Микропредприятие',
+  '2': 'Малое предприятие',
+  '3': 'Среднее предприятие',
+}
+
+const procedureName: Record<string, string> = {
+  FinancialRecovery: 'Финансовое оздоровление',
+  ExternalManagement: 'Внешнее управление',
+  Tender: 'Конкурсное производство',
+  Watching: 'Наблюдение',
+  CitizenAssetsDisposal: 'Реализация имущества гражданина',
+  CitizenDebtRestructuring: 'Реструктуризация долгов гражданина',
+}
+
+const scheduleName: Record<string, string> = {
+  '1': 'срок платежа не наступил',
+  '2': 'платежи вовремя',
+  '3': 'платежи с просрочкой',
+}
+
+const roleName: Record<string, string> = {
+  company: 'компания',
+  entrepreneur: 'предприниматель',
+  director: 'руководитель',
+  founder: 'учредитель',
+}
+
+function ruDate(iso: string) {
+  const [year, month, day] = iso.split('-')
+  return day && month && year ? `${day}.${month}.${year}` : iso
+}
+
+function roleLabel(whose: BkiObligation['whose']) {
+  const roles = Array.isArray(whose) ? whose : [whose]
+  return roles.map((role) => roleName[role] ?? role).join(', ')
+}
+
+function RegistryCard({
+  company,
+  profile,
+  profileFailed,
+}: {
+  company: CompanyLookup
+  profile: BusinessCard | null
+  profileFailed: boolean
+}) {
+  const entity = company.legalEntities[0]
+  const person = company.entrepreneurs[0]
+  const founded = company.foundedOrganizations[0]
+  const title = profile?.business.name ?? entity?.shortName ?? (person ? entrepreneurName(person) : founded?.shortName ?? 'Запись реестра')
+  const inn = profile?.business.inn ?? entity?.inn ?? person?.inn ?? founded?.inn
+  const msp = profile ? mspProfile(profile) : null
+  const liquidated = profile?.business.liquidated ?? false
+  const statusNote = profile?.business.status
+  const flags = profile
+    ? [
+        profile.stops.overdue ? 'Просрочка в БКИ' : null,
+        profile.fns.disqualified ? 'Дисквалификация' : null,
+        profile.fns.massLeader ? 'Массовый руководитель' : null,
+        profile.fns.massFounder ? 'Массовый учредитель' : null,
+        profile.fns.massAddress ? 'Массовый адрес' : null,
+        profile.fns.hasBailiffDebt ? 'Долг у приставов' : null,
+        msp?.newBusiness ? 'Вновь созданный' : null,
+        profile.fns.accountBlocked ? 'Счёт заблокирован' : null,
+      ].filter((flag): flag is string => Boolean(flag))
+    : []
+
+  return (
+    <div className="animate-fade-up mt-6 rounded-xl border border-line">
+      <div className="flex items-center gap-4 border-b border-line px-6 py-5">
+        <div className="grid size-12 place-items-center rounded-xl bg-canvas text-ink">
+          <Icon name={entity || founded || profile?.business.kind === 'legal_entity' ? 'building' : 'user'} size={22} />
+        </div>
+        <div className="flex-1">
+          <div className="text-[17px] font-semibold text-ink">{title}</div>
+          {inn && <div className="tnum text-sm text-muted">ИНН {inn}</div>}
+          {profile?.business.registrationDate && (
+            <div className="mt-1 text-sm text-muted">с {ruDate(profile.business.registrationDate)}</div>
+          )}
+        </div>
+        <Badge
+          tone={!profile ? 'ok' : liquidated ? 'danger' : profile.fedresurs.bankruptcyActive || statusNote ? 'warn' : 'ok'}
+          dot
+        >
+          {!profile
+            ? 'Найдено в реестре'
+            : liquidated
+              ? 'Прекращена'
+              : profile.fedresurs.bankruptcyActive
+                ? 'Банкротство'
+                : statusNote
+                  ? 'Особый статус'
+                  : 'Действующая'}
+        </Badge>
+      </div>
+      {statusNote && <div className="border-b border-line px-6 py-3 text-sm text-ink">{statusNote}</div>}
+      <div className="grid grid-cols-3 gap-x-8 gap-y-5 px-6 py-5">
+        {entity && <KV k="ОГРН" v={entity.ogrn} mono />}
+        {person && <KV k="ОГРНИП" v={person.ogrnip} mono />}
+        {person && entity && <KV k="ИП" v={entrepreneurName(person)} />}
+        {profile && (
+          <KV
+            k="МСП"
+            v={
+              msp
+                ? [mspCategory[msp.categoryCode ?? ''] ?? 'Категория не указана', msp.headcount == null ? null : `численность ${msp.headcount.toLocaleString('ru-RU')}`]
+                    .filter(Boolean)
+                    .join(' · ')
+                : 'Нет в реестре'
+            }
+          />
+        )}
+        {profile && (
+          <KV k="Налоговая задолженность" v={profile.fns.arrearsTotal == null ? 'Нет данных' : rub(profile.fns.arrearsTotal)} mono />
+        )}
+        {profile && (
+          <KV
+            k="Иски к ответчику"
+            v={
+              profile.arbitration.openDefendantCases > 0
+                ? `${profile.arbitration.openDefendantCases} · ${rub(profile.arbitration.openClaimSum)}`
+                : 'Нет открытых дел'
+            }
+            mono
+          />
+        )}
+        {profile && (
+          <KV
+            k="Банкротство"
+            v={
+              profile.fedresurs.bankruptcyActive
+                ? procedureName[profile.fedresurs.procedureType ?? ''] ?? profile.fedresurs.procedureType ?? 'Процедура идёт'
+                : 'Нет действующей процедуры'
+            }
+          />
+        )}
+        {profile && <KV k="Залог" v={profile.fedresurs.pledgeActive ? 'Есть действующий залог' : 'Нет'} />}
+        {profile && profile.fns.accountBlocked == null && <KV k="Блокировка счёта" v="Нет данных" />}
+        {company.foundedOrganizations.map((organization) => (
+          <KV
+            key={organization.ogrn}
+            k="Доля в организации"
+            v={`${organization.shortName} · ${organization.sharePercent.toLocaleString('ru-RU')}%`}
+          />
+        ))}
+      </div>
+      {flags.length > 0 && (
+        <div className="flex flex-wrap gap-2 px-6 pb-5">
+          {flags.map((flag) => (
+            <Badge key={flag} tone="warn">
+              {flag}
+            </Badge>
+          ))}
+        </div>
+      )}
+      {profile && profile.bki.length > 0 && (
+        <div className="space-y-3 border-t border-line px-6 py-5">
+          <div className="text-xs text-muted">Обязательства в БКИ</div>
+          {profile.bki.map((row, index) => (
+            <div key={`${row.inn}-${index}`} className="text-sm text-ink">
+              <span className="font-medium">{roleLabel(row.whose)}</span>
+              <span className="text-muted"> · ИНН {row.inn} · </span>
+              <span className="tnum">просрочка {rub(row.debtOverdueSum)}</span>
+              <span className="text-muted"> · {scheduleName[row.scheduleCode ?? ''] ?? 'код срока не указан'}</span>
+            </div>
+          ))}
+        </div>
+      )}
+      {profileFailed && (
+        <div className="border-t border-line px-6 py-3 text-sm text-muted">Карточка ФНС, МСП, БКИ и Федресурса не загрузилась</div>
+      )}
+      <div className="flex items-center gap-2 border-t border-line bg-canvas/50 px-6 py-3 text-xs text-muted">
+        <Icon name="shield" size={14} className="text-ok" />
+        {profile ? 'Источник: ЕГРЮЛ, ЕГРИП, ФНС, МСП, БКИ, Федресурс и арбитраж' : 'Источник: ЕГРЮЛ и ЕГРИП'}
+      </div>
+    </div>
+  )
+}
+
+const purposePresets = [
+  'Пополнение оборотных средств',
+  'Покупка оборудования',
+  'Исполнение контракта',
+  'Ремонт и модернизация',
+  'Покупка транспорта',
+]
+
+function consentText(link: 'connecting' | 'open' | 'closed', saved: boolean | null) {
+  if (link === 'connecting') return 'Подключаемся к серверу согласия…'
+  if (link === 'closed') return 'Нет связи с сервером согласия'
+  if (saved === true) return 'Согласие записано на сервере'
+  if (saved === false) return 'Отказ записан на сервере'
+  return 'Отметка ещё не записана. Она живёт, пока открыта эта страница.'
+}
+
+export function Wizard({ initial, onSubmit }: { initial: LoanDraft; onSubmit: (number: number) => void }) {
+  const consent = useBkiConsent()
+  const [purpose, setPurpose] = useState(initial.purpose)
+  const [amount, setAmount] = useState(initial.amount)
+  const [termMonths, setTermMonths] = useState(initial.termMonths)
   const [inn, setInn] = useState('7701234567')
-  const [enrich, setEnrich] = useState<'idle' | 'loading' | 'done'>('done')
+  const [lookup, setLookup] = useState<LookupState>({ status: 'idle' })
   const [revenue, setRevenue] = useState('186 400 000')
   const [debt, setDebt] = useState('22 500 000')
   const [employees, setEmployees] = useState('84')
@@ -56,12 +268,34 @@ export function Wizard({ onSubmit }: { onSubmit: () => void }) {
     { name: 'ОФР_2025.pdf', size: '860 КБ', kind: required[1], state: 'ok' },
   ])
   const [drag, setDrag] = useState(false)
+  const [sending, setSending] = useState(false)
+  const [submitError, setSubmitError] = useState<string | null>(null)
   const fileRef = useRef<HTMLInputElement>(null)
 
-  const runEnrich = () => {
-    if (inn.replace(/\D/g, '').length < 10) return
-    setEnrich('loading')
-    setTimeout(() => setEnrich('done'), 1100)
+  const runEnrich = async () => {
+    const digits = inn.replace(/\D/g, '')
+    if (digits.length < 10) return
+    setLookup({ status: 'loading' })
+    try {
+      const company = await lookupCompany(digits)
+      if (!hasRegistryRecord(company)) {
+        setLookup({ status: 'empty' })
+        return
+      }
+      const id = registrationId(company)
+      let profile: BusinessCard | null = null
+      let profileFailed = false
+      if (id) {
+        try {
+          profile = await lookupBusiness(id)
+        } catch {
+          profileFailed = true
+        }
+      }
+      setLookup({ status: 'ready', company, profile, profileFailed })
+    } catch {
+      setLookup({ status: 'error' })
+    }
   }
 
   const addFiles = (files: FileList | null) => {
@@ -77,19 +311,57 @@ export function Wizard({ onSubmit }: { onSubmit: () => void }) {
     })
   }
 
-  const step1 = enrich === 'done'
+  const attachSamples = () => {
+    const missing = required.filter((item) => !docs.some((doc) => doc.kind === item))
+    const added: Doc[] = missing.map((kind) => ({ name: `${kind}.pdf`, size: '640 КБ', kind, state: 'checking' }))
+    if (!added.length) return
+    setDocs((current) => [...current, ...added])
+    added.forEach((doc, index) => {
+      setTimeout(
+        () => setDocs((current) => current.map((item) => (item.kind === doc.kind ? { ...item, state: 'ok' } : item))),
+        400 + index * 200,
+      )
+    })
+  }
+
+  const step1 = lookup.status === 'ready'
   const step2 = step1 && revenue.length > 0 && debt.length > 0
   const step3 = step2 && required.every((item) => docs.some((doc) => doc.kind === item && doc.state === 'ok'))
   const step = !step1 ? 1 : !step2 ? 2 : !step3 ? 3 : 4
   const revenueValue = Number(revenue.replace(/\D/g, '')) || 0
   const debtValue = Number(debt.replace(/\D/g, '')) || 0
-  const load = revenueValue ? Math.round(((debtValue + 15_000_000) / revenueValue) * 100) : 0
+  const load = revenueValue ? Math.round(((debtValue + amount) / revenueValue) * 100) : 0
+  const foundId = lookup.status === 'ready' ? registrationId(lookup.company) : null
+  const purposeReady = purpose.trim().length > 0
+  const payment = annuity(amount, 19.9, termMonths)
+
+  const send = async () => {
+    if (!foundId || !purposeReady) return
+    setSending(true)
+    setSubmitError(null)
+    try {
+      const created = await createApplication({
+        purpose: purpose.trim(),
+        amount,
+        termMonths,
+        inn: inn.replace(/\D/g, ''),
+        registrationId: foundId,
+      })
+      onSubmit(created.number)
+    } catch (error) {
+      setSubmitError(error instanceof Error ? error.message : 'Не удалось отправить заявку')
+    } finally {
+      setSending(false)
+    }
+  }
 
   return (
     <div className="space-y-6">
       <div className="flex items-end justify-between">
         <div>
-          <p className="text-sm text-muted">Оборотный кредит без залога · 15 млн ₽ на 24 мес</p>
+          <p className="text-sm text-muted">
+            {purpose.trim() || 'Укажите цель кредита'} · {rub(amount)} · {months(termMonths)}
+          </p>
           <h1 className="mt-1 text-[32px] font-semibold tracking-[-0.025em] text-ink">Подача заявки</h1>
         </div>
         <span className="flex items-center gap-2 text-sm text-muted">
@@ -100,6 +372,36 @@ export function Wizard({ onSubmit }: { onSubmit: () => void }) {
 
       <Stepper step={step} />
 
+      <Card className="p-8">
+        <CardHeader title="Цель кредита" subtitle="Напишите, на что нужны деньги. Категорию определим по тексту." />
+        <div className="mt-6 flex flex-wrap gap-2">
+          {purposePresets.map((preset) => (
+            <button
+              key={preset}
+              type="button"
+              onClick={() => setPurpose(preset)}
+              className={cx(
+                'h-10 cursor-pointer rounded-full border px-4 text-sm font-medium transition-colors',
+                purpose === preset ? 'border-ink bg-ink text-white' : 'border-line bg-white text-ink hover:border-[#cfd4da]',
+              )}
+            >
+              {preset}
+            </button>
+          ))}
+        </div>
+        <label className="mt-5 block">
+          <span className="text-sm font-medium text-ink">Как сформулировать цель</span>
+          <textarea
+            value={purpose}
+            maxLength={1000}
+            rows={3}
+            onChange={(event) => setPurpose(event.target.value)}
+            className="mt-2 w-full resize-y rounded-xl border border-line bg-white px-4 py-3 text-sm text-ink outline-none focus:border-ink"
+            placeholder="Например, покупка оборудования для цеха"
+          />
+        </label>
+      </Card>
+
       <div className="grid grid-cols-12 gap-6">
         <div className="col-span-8 space-y-6">
           <Card className="p-8">
@@ -107,10 +409,12 @@ export function Wizard({ onSubmit }: { onSubmit: () => void }) {
               title="1. О компании"
               subtitle="Введите ИНН — остальное заполним из государственных реестров"
               action={
-                enrich === 'done' && (
+                lookup.status === 'ready' && (
                   <Badge tone="ok">
                     <Icon name="checkCircle" size={14} strokeWidth={2.25} />
-                    Данные из ЕГРЮЛ и ФНС загружены
+                    {lookup.status === 'ready' && lookup.profile
+                      ? 'Карточка реестров загружена'
+                      : 'Данные из ЕГРЮЛ и ЕГРИП загружены'}
                   </Badge>
                 )
               }
@@ -126,10 +430,10 @@ export function Wizard({ onSubmit }: { onSubmit: () => void }) {
                       inputMode="numeric"
                       onChange={(event) => {
                         setInn(event.target.value.replace(/\D/g, ''))
-                        setEnrich('idle')
+                        setLookup({ status: 'idle' })
                       }}
                     />
-                    {enrich === 'done' && (
+                    {lookup.status === 'ready' && (
                       <Icon
                         name="checkCircle"
                         size={20}
@@ -139,8 +443,8 @@ export function Wizard({ onSubmit }: { onSubmit: () => void }) {
                   </div>
                 </Field>
               </div>
-              <Button type="button" variant="secondary" onClick={runEnrich} disabled={enrich === 'loading'}>
-                {enrich === 'loading' ? (
+              <Button type="button" variant="secondary" onClick={runEnrich} disabled={lookup.status === 'loading'}>
+                {lookup.status === 'loading' ? (
                   <>
                     <span className="size-4 animate-spin rounded-full border-2 border-line border-t-ink" />
                     Запрос в реестры…
@@ -154,36 +458,14 @@ export function Wizard({ onSubmit }: { onSubmit: () => void }) {
               </Button>
             </div>
 
-            {enrich === 'done' ? (
-              <div className="animate-fade-up mt-6 rounded-xl border border-line">
-                <div className="flex items-center gap-4 border-b border-line px-6 py-5">
-                  <div className="grid size-12 place-items-center rounded-xl bg-canvas text-ink">
-                    <Icon name="building" size={22} />
-                  </div>
-                  <div className="flex-1">
-                    <div className="text-[17px] font-semibold text-ink">ООО «Вектор Логистик»</div>
-                    <div className="text-sm text-muted">Общество с ограниченной ответственностью · с 14.03.2017</div>
-                  </div>
-                  <Badge tone="ok" dot>
-                    Действующая
-                  </Badge>
-                </div>
-                <div className="grid grid-cols-3 gap-x-8 gap-y-5 px-6 py-5">
-                  <KV k="ОГРН" v="1177746258341" mono />
-                  <KV k="КПП" v="770101001" mono />
-                  <KV k="Уставный капитал" v="1 000 000 ₽" mono />
-                  <KV k="ОКВЭД" v="49.41 — Деятельность автомобильного грузового транспорта" />
-                  <KV k="Генеральный директор" v="Орлов Михаил Сергеевич" />
-                  <KV k="Юридический адрес" v="123112, г. Москва, Пресненская наб., д. 12, оф. 45" />
-                </div>
-                <div className="flex items-center gap-2 border-t border-line bg-canvas/50 px-6 py-3 text-xs text-muted">
-                  <Icon name="shield" size={14} className="text-ok" />
-                  Источники: ЕГРЮЛ, ФНС «Прозрачный бизнес», Росстат · актуально на 14.05.2026
-                </div>
-              </div>
+            {lookup.status === 'ready' ? (
+              <RegistryCard company={lookup.company} profile={lookup.profile} profileFailed={lookup.profileFailed} />
             ) : (
-              <div className="mt-6 grid h-[188px] place-items-center rounded-xl border border-dashed border-line text-sm text-muted">
-                {enrich === 'loading' ? 'Получаем данные из ЕГРЮЛ и ФНС…' : 'Нажмите «Найти», чтобы загрузить реквизиты'}
+              <div className="mt-6 grid h-[188px] place-items-center rounded-xl border border-dashed border-line px-6 text-center text-sm text-muted">
+                {lookup.status === 'loading' && 'Получаем данные из ЕГРЮЛ и ЕГРИП…'}
+                {lookup.status === 'idle' && 'Нажмите «Найти», чтобы загрузить реквизиты'}
+                {lookup.status === 'empty' && 'В реестре нет записи с таким ИНН'}
+                {lookup.status === 'error' && 'Не удалось запросить реестр'}
               </div>
             )}
           </Card>
@@ -245,6 +527,16 @@ export function Wizard({ onSubmit }: { onSubmit: () => void }) {
               <div className="mt-1 text-sm text-muted">
                 или <span className="font-medium text-alfa">выберите на компьютере</span>
               </div>
+              <button
+                type="button"
+                className="mt-4 cursor-pointer text-sm font-medium text-ink underline decoration-line underline-offset-4"
+                onClick={(event) => {
+                  event.stopPropagation()
+                  attachSamples()
+                }}
+              >
+                Приложить примеры
+              </button>
               <input
                 ref={fileRef}
                 type="file"
@@ -289,21 +581,40 @@ export function Wizard({ onSubmit }: { onSubmit: () => void }) {
           <div className="sticky top-6 space-y-6">
             <Card className="p-6">
               <div className="text-xs font-semibold tracking-[0.08em] text-muted uppercase">Ваша заявка</div>
-              <div className="mt-4 text-[17px] font-semibold text-ink">Оборотный кредит без залога</div>
+              <div className="mt-4 text-[17px] font-semibold text-ink">{purpose.trim() || 'Цель не указана'}</div>
+              <div className="mt-5 space-y-5">
+                <Slider
+                  label="Сумма кредита"
+                  value={amount}
+                  min={1_000_000}
+                  max={30_000_000}
+                  step={500_000}
+                  onChange={setAmount}
+                  format={rub}
+                  minLabel="1 млн"
+                  maxLabel="30 млн"
+                />
+                <Slider
+                  label="Срок"
+                  value={termMonths}
+                  min={6}
+                  max={36}
+                  step={1}
+                  onChange={setTermMonths}
+                  format={months}
+                  minLabel="6 мес"
+                  maxLabel="36 мес"
+                />
+              </div>
               <dl className="mt-5 space-y-3 text-sm">
-                {(
-                  [
-                    ['Сумма', '15 000 000 ₽'],
-                    ['Срок', '24 месяца'],
-                    ['Ставка', 'от 19,9%'],
-                    ['Платёж', '≈ 763 400 ₽/мес'],
-                  ] as const
-                ).map(([label, value]) => (
-                  <div key={label} className="flex justify-between">
-                    <dt className="text-muted">{label}</dt>
-                    <dd className="tnum font-medium text-ink">{value}</dd>
-                  </div>
-                ))}
+                <div className="flex justify-between">
+                  <dt className="text-muted">Ставка</dt>
+                  <dd className="tnum font-medium text-ink">от 19,9%</dd>
+                </div>
+                <div className="flex justify-between">
+                  <dt className="text-muted">Платёж</dt>
+                  <dd className="tnum font-medium text-ink">≈ {rub(payment)}/мес</dd>
+                </div>
               </dl>
               <div className="mt-6 border-t border-line pt-5">
                 <div className="flex justify-between text-sm">
@@ -317,10 +628,33 @@ export function Wizard({ onSubmit }: { onSubmit: () => void }) {
                   />
                 </div>
               </div>
-              <Button type="button" size="lg" className="mt-6 w-full" disabled={!step3} onClick={onSubmit}>
-                Отправить в банк
+              <label className="mt-6 flex items-start gap-3 rounded-xl border border-line px-4 py-3">
+                <input
+                  type="checkbox"
+                  className="mt-1 size-4 accent-alfa"
+                  checked={consent.checked}
+                  disabled={consent.link !== 'open'}
+                  onChange={(event) => consent.toggle(event.target.checked)}
+                />
+                <span>
+                  <span className="block text-sm font-medium text-ink">Разрешаю запрос кредитной истории в БКИ</span>
+                  <span className="mt-1 block text-xs text-muted">{consentText(consent.link, consent.saved)}</span>
+                </span>
+              </label>
+              <Button type="button" size="lg" className="mt-6 w-full" disabled={!step3 || !purposeReady || !foundId || sending} onClick={send}>
+                {sending ? 'Отправляем…' : 'Отправить в банк'}
               </Button>
-              {!step3 && <p className="mt-3 text-center text-xs text-muted">Загрузите все обязательные документы</p>}
+              {submitError && <p className="mt-3 text-center text-xs text-alfa">{submitError}</p>}
+              {!submitError && !purposeReady && <p className="mt-3 text-center text-xs text-muted">Укажите цель кредита</p>}
+              {!submitError && purposeReady && lookup.status === 'ready' && !foundId && (
+                <p className="mt-3 text-center text-xs text-muted">В реестре нет ОГРН или ОГРНИП, заявку отправить нельзя</p>
+              )}
+              {!submitError && (!step3 || !foundId) && purposeReady && lookup.status !== 'ready' && (
+                <p className="mt-3 text-center text-xs text-muted">Найдите компанию и загрузите все обязательные документы</p>
+              )}
+              {!submitError && purposeReady && foundId && !step3 && (
+                <p className="mt-3 text-center text-xs text-muted">Загрузите все обязательные документы</p>
+              )}
             </Card>
             <div className="flex gap-3 rounded-2xl border border-line bg-white p-5 text-sm">
               <Icon name="shield" size={20} className="shrink-0 text-muted" />
