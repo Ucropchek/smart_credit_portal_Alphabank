@@ -1,10 +1,10 @@
 import { useEffect, useState } from 'react'
-import { answerApplication, getApplication, type ApplicationDetail } from '../api/applications'
+import { answerApplication, getApplication, saveStatement, type ApplicationDetail } from '../api/applications'
 import { cx } from '../components/cx'
 import { Icon } from '../components/Icon'
 import type { Scenario } from '../components/Shell'
 import { Badge, Button, Card, CardHeader } from '../components/ui'
-import { annuity, months, rub } from '../format'
+import { annuity, monthLabel, months, rub } from '../format'
 
 const stages = [
   { label: 'Заявка подана', time: '12 мая, 10:24' },
@@ -38,11 +38,36 @@ const clientDecision: Record<string, { title: string; short: string }> = {
   reject: { title: 'Банк отказал в кредите', short: 'Отказ' },
 }
 
+type TurnoverDraft = { month: string; incoming: string; outgoing: string }
+
+const exampleIncoming = [16_000_000, 15_500_000, 16_500_000, 17_000_000, 15_000_000, 16_000_000]
+const exampleOutgoing = [12_000_000, 11_800_000, 12_400_000, 13_000_000, 11_200_000, 12_100_000]
+
+function recentMonths(): TurnoverDraft[] {
+  const now = new Date()
+  return Array.from({ length: 6 }, (_, index) => {
+    const date = new Date(now.getFullYear(), now.getMonth() - (6 - index), 1)
+    const month = `${date.getFullYear()}-${String(date.getMonth() + 1).padStart(2, '0')}`
+    return { month, incoming: '', outgoing: '' }
+  })
+}
+
+function parseMoney(text: string) {
+  const normalized = text.replace(/\s/g, '').replace(',', '.')
+  if (!/^\d+(\.\d{1,2})?$/.test(normalized)) return null
+  const value = Number(normalized)
+  return Number.isFinite(value) ? value : null
+}
+
 function LiveApplication({ number }: { number: number }) {
   const [loaded, setLoaded] = useState<{ number: number; detail: ApplicationDetail | null; failed: boolean } | null>(null)
   const [answers, setAnswers] = useState<Record<number, string>>({})
   const [answering, setAnswering] = useState<number | null>(null)
   const [answerError, setAnswerError] = useState<string | null>(null)
+  const [rows, setRows] = useState(recentMonths)
+  const [editing, setEditing] = useState(false)
+  const [savingStatement, setSavingStatement] = useState(false)
+  const [statementError, setStatementError] = useState<string | null>(null)
 
   useEffect(() => {
     let cancel = false
@@ -63,6 +88,42 @@ function LiveApplication({ number }: { number: number }) {
   const failed = current?.failed ?? false
   const active = detail ? Math.max(0, ['submitted', 'registryCheck', 'scoring', 'decision'].indexOf(detail.step)) : 0
   const verdict = detail?.employeeDecision ? clientDecision[detail.employeeDecision.outcome] : undefined
+
+  const fillExample = () => {
+    setRows((current) =>
+      current.map((row, index) => ({
+        ...row,
+        incoming: String(exampleIncoming[index] ?? 0),
+        outgoing: String(exampleOutgoing[index] ?? 0),
+      })),
+    )
+    setStatementError(null)
+  }
+
+  const sendStatement = async () => {
+    const turnover = []
+    for (const row of rows) {
+      const incoming = parseMoney(row.incoming)
+      const outgoing = parseMoney(row.outgoing)
+      if (incoming == null || outgoing == null) {
+        setStatementError('Укажите поступления и списания за каждый месяц')
+        return
+      }
+      turnover.push({ month: row.month, incoming, outgoing })
+    }
+    setSavingStatement(true)
+    setStatementError(null)
+    try {
+      await saveStatement(number, turnover)
+      const app = await getApplication(number)
+      setLoaded({ number, detail: app, failed: false })
+      setEditing(false)
+    } catch (error) {
+      setStatementError(error instanceof Error ? error.message : 'Не удалось передать выписку')
+    } finally {
+      setSavingStatement(false)
+    }
+  }
 
   const sendAnswer = async (requestId: number) => {
     const text = answers[requestId]?.trim() ?? ''
@@ -154,6 +215,28 @@ function LiveApplication({ number }: { number: number }) {
             </div>
           </Card>
 
+          <StatementCard
+            statement={detail.statement}
+            rows={rows}
+            editing={editing}
+            saving={savingStatement}
+            error={statementError}
+            onEdit={() => {
+              const saved = detail.statement?.turnover ?? []
+              if (saved.length >= 6) {
+                setRows(saved.map((row) => ({ month: row.month, incoming: String(row.incoming), outgoing: String(row.outgoing) })))
+              }
+              setEditing(true)
+              setStatementError(null)
+            }}
+            onChange={(index, field, value) => {
+              setRows((current) => current.map((row, rowIndex) => (rowIndex === index ? { ...row, [field]: value } : row)))
+              setStatementError(null)
+            }}
+            onExample={fillExample}
+            onSend={sendStatement}
+          />
+
           {(detail.requests?.length ?? 0) > 0 && (
             <Card className="p-8">
               <CardHeader title="Банк запросил уточнение" subtitle="Ответ сохранится в заявке" />
@@ -223,6 +306,133 @@ function LiveApplication({ number }: { number: number }) {
         </>
       )}
     </div>
+  )
+}
+
+function StatementCard({
+  statement,
+  rows,
+  editing,
+  saving,
+  error,
+  onEdit,
+  onChange,
+  onExample,
+  onSend,
+}: {
+  statement: ApplicationDetail['statement']
+  rows: TurnoverDraft[]
+  editing: boolean
+  saving: boolean
+  error: string | null
+  onEdit: () => void
+  onChange: (index: number, field: 'incoming' | 'outgoing', value: string) => void
+  onExample: () => void
+  onSend: () => void
+}) {
+  const saved = statement?.consent === true && statement.turnover.length > 0 ? statement.turnover : null
+  const showForm = editing || saved == null
+  const incoming = saved?.reduce((sum, row) => sum + row.incoming, 0) ?? 0
+  const outgoing = saved?.reduce((sum, row) => sum + row.outgoing, 0) ?? 0
+
+  return (
+    <Card className="p-8">
+      <CardHeader
+        title="Выписка по счёту"
+        subtitle="Шесть месяцев оборотов сохраняются в заявке"
+        action={
+          saved && !showForm ? (
+            <Badge tone="ok" dot>
+              Передана
+            </Badge>
+          ) : undefined
+        }
+      />
+      {saved && !showForm ? (
+        <>
+          <TurnoverTable rows={saved} incoming={incoming} outgoing={outgoing} />
+          <Button type="button" variant="secondary" className="mt-6" onClick={onEdit}>
+            Исправить обороты
+          </Button>
+        </>
+      ) : (
+        <>
+          <div className="mt-6 overflow-hidden rounded-xl border border-line">
+            <div className="grid grid-cols-[1.2fr_1fr_1fr] bg-canvas px-4 py-2 text-xs text-muted">
+              <span>Месяц</span>
+              <span>Поступления, ₽</span>
+              <span>Списания, ₽</span>
+            </div>
+            {rows.map((row, index) => (
+              <div key={row.month} className="grid grid-cols-[1.2fr_1fr_1fr] items-center gap-3 border-t border-line px-4 py-2.5">
+                <span className="text-sm text-ink">{monthLabel(row.month)}</span>
+                <input
+                  inputMode="decimal"
+                  aria-label={`${monthLabel(row.month)}, поступления`}
+                  value={row.incoming}
+                  onChange={(event) => onChange(index, 'incoming', event.target.value)}
+                  className="tnum h-10 rounded-lg border border-line px-3 text-sm text-ink outline-none focus:border-ink"
+                  placeholder="0"
+                />
+                <input
+                  inputMode="decimal"
+                  aria-label={`${monthLabel(row.month)}, списания`}
+                  value={row.outgoing}
+                  onChange={(event) => onChange(index, 'outgoing', event.target.value)}
+                  className="tnum h-10 rounded-lg border border-line px-3 text-sm text-ink outline-none focus:border-ink"
+                  placeholder="0"
+                />
+              </div>
+            ))}
+          </div>
+          <div className="mt-6 flex gap-3">
+            <Button type="button" variant="secondary" onClick={onExample}>
+              Подставить пример
+            </Button>
+            <Button type="button" onClick={onSend} disabled={saving}>
+              {saving ? 'Передаём…' : 'Передать банку'}
+            </Button>
+          </div>
+          {error && <p className="mt-3 text-sm text-alfa">{error}</p>}
+        </>
+      )}
+    </Card>
+  )
+}
+
+function TurnoverTable({
+  rows,
+  incoming,
+  outgoing,
+}: {
+  rows: Array<{ month: string; incoming: number; outgoing: number }>
+  incoming: number
+  outgoing: number
+}) {
+  return (
+    <table className="mt-6 w-full text-sm">
+      <thead>
+        <tr className="text-left text-xs text-muted">
+          <th className="pb-2 font-medium">Месяц</th>
+          <th className="pb-2 text-right font-medium">Поступления</th>
+          <th className="pb-2 text-right font-medium">Списания</th>
+        </tr>
+      </thead>
+      <tbody>
+        {rows.map((row) => (
+          <tr key={row.month} className="border-t border-line">
+            <td className="py-2.5 text-ink">{monthLabel(row.month)}</td>
+            <td className="tnum py-2.5 text-right text-ink">{rub(row.incoming)}</td>
+            <td className="tnum py-2.5 text-right text-ink">{rub(row.outgoing)}</td>
+          </tr>
+        ))}
+        <tr className="border-t border-line font-semibold">
+          <td className="py-2.5 text-ink">Итого</td>
+          <td className="tnum py-2.5 text-right text-ink">{rub(incoming)}</td>
+          <td className="tnum py-2.5 text-right text-ink">{rub(outgoing)}</td>
+        </tr>
+      </tbody>
+    </table>
   )
 }
 

@@ -6,13 +6,14 @@ import {
   getApplication,
   listApplications,
   scoreApplication,
+  type AccountStatement,
   type ApplicationDetail,
   type ApplicationListItem,
   type RegistrySnapshot,
 } from '../api/applications'
 import { cx } from '../components/cx'
 import { Badge, Button, Card, CardHeader, KV } from '../components/ui'
-import { months, rub } from '../format'
+import { monthLabel, months, rub } from '../format'
 
 const decisionLabel: Record<string, string> = {
   approve: 'Одобрение',
@@ -98,6 +99,57 @@ function RegistryFacts({ registries }: { registries: RegistrySnapshot }) {
       <KV k="БКИ" v={bki} />
       {flags.length > 0 && <KV k="Флаги ФНС" v={flags.join(', ')} />}
     </div>
+  )
+}
+
+function StatementFacts({ statement }: { statement: AccountStatement | undefined }) {
+  const saved = statement?.consent === true ? statement.turnover : []
+  const incoming = saved.reduce((sum, row) => sum + row.incoming, 0)
+  const outgoing = saved.reduce((sum, row) => sum + row.outgoing, 0)
+
+  return (
+    <Card className="p-8">
+      <CardHeader
+        title="Выписка"
+        subtitle="Обороты по счёту, которые клиент передал в заявку"
+        action={
+          saved.length > 0 && (
+            <Badge tone="ok" dot>
+              {saved.length} мес.
+            </Badge>
+          )
+        }
+      />
+      {saved.length === 0 ? (
+        <p className="mt-4 text-sm text-muted">
+          {statement?.consent === false ? 'Клиент отказался передавать выписку.' : 'Клиент ещё не передал обороты.'}
+        </p>
+      ) : (
+        <table className="mt-6 w-full text-sm">
+          <thead>
+            <tr className="text-left text-xs text-muted">
+              <th className="pb-2 font-medium">Месяц</th>
+              <th className="pb-2 text-right font-medium">Поступления</th>
+              <th className="pb-2 text-right font-medium">Списания</th>
+            </tr>
+          </thead>
+          <tbody>
+            {saved.map((row) => (
+              <tr key={row.month} className="border-t border-line">
+                <td className="py-2.5 text-ink">{monthLabel(row.month)}</td>
+                <td className="tnum py-2.5 text-right text-ink">{rub(row.incoming)}</td>
+                <td className="tnum py-2.5 text-right text-ink">{rub(row.outgoing)}</td>
+              </tr>
+            ))}
+            <tr className="border-t border-line font-semibold">
+              <td className="py-2.5 text-ink">Итого</td>
+              <td className="tnum py-2.5 text-right text-ink">{rub(incoming)}</td>
+              <td className="tnum py-2.5 text-right text-ink">{rub(outgoing)}</td>
+            </tr>
+          </tbody>
+        </table>
+      )}
+    </Card>
   )
 }
 
@@ -349,6 +401,8 @@ export function Underwriter({ onCount }: { onCount?: (count: number) => void }) 
                 </Button>
                 {checkError && <p className="mt-3 text-sm text-alfa">{checkError}</p>}
               </Card>
+
+              <StatementFacts statement={detail.statement} />
 
               <Card className="p-8">
                 <CardHeader title="Уточнения клиенту" subtitle="Вопрос увидит предприниматель в статусе заявки" />

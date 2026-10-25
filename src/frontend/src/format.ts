@@ -8,6 +8,30 @@ export function annuity(amount: number, ratePct: number, monthsCount: number) {
   return (amount * r) / (1 - Math.pow(1 + r, -monthsCount))
 }
 
+const monthNames = [
+  'январь',
+  'февраль',
+  'март',
+  'апрель',
+  'май',
+  'июнь',
+  'июль',
+  'август',
+  'сентябрь',
+  'октябрь',
+  'ноябрь',
+  'декабрь',
+]
+
+export function monthLabel(yyyyMm: string) {
+  const [yearText, monthText] = yyyyMm.split('-')
+  const year = Number(yearText)
+  const month = Number(monthText)
+  const name = monthNames[month - 1]
+  if (!year || !name) return yyyyMm
+  return `${name} ${year}`
+}
+
 export function months(n: number) {
   const m10 = n % 10
   const m100 = n % 100

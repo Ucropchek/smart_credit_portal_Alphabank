@@ -90,6 +90,18 @@ export type ApplicationDetail = {
   }
   requests?: InformationRequest[]
   registries?: RegistrySnapshot
+  statement?: AccountStatement
+}
+
+export type TurnoverMonth = {
+  month: string
+  incoming: number
+  outgoing: number
+}
+
+export type AccountStatement = {
+  consent: boolean
+  turnover: TurnoverMonth[]
 }
 
 export type InformationRequest = {
@@ -220,6 +232,21 @@ export async function answerApplication(number: number, requestId: number, text:
     signal: AbortSignal.timeout(8000),
   })
   if (!response.ok) throw new Error(await errorText(response, 'Не удалось отправить ответ'))
+}
+
+export async function saveStatement(number: number, turnover: TurnoverMonth[]): Promise<ApplicationDetail> {
+  const response = await fetch(`/applications/${number}/statement-consent`, {
+    method: 'POST',
+    headers: { 'content-type': 'application/json' },
+    body: JSON.stringify({ consent: true, turnover }),
+    signal: AbortSignal.timeout(8000),
+  })
+  const body: unknown = await response.json().catch(() => null)
+  if (!response.ok || !isDetail(body)) {
+    const message = body && typeof body === 'object' && 'error' in body && typeof body.error === 'string' ? body.error : 'Не удалось передать выписку'
+    throw new Error(message)
+  }
+  return body
 }
 
 export async function checkRegistries(number: number): Promise<ApplicationDetail> {
