@@ -33,6 +33,7 @@ export type ScorePoint = {
 
 export type ApplicationScore = {
   total: number
+  totalBeforeCap?: number
   decision: string
   reason: string
   stops?: {

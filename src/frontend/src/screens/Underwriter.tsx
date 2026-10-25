@@ -580,6 +580,11 @@ export function Underwriter({
                       {detail.score.total}
                       <span className="text-xl text-muted">/100</span>
                     </div>
+                    {typeof detail.score.totalBeforeCap === 'number' && detail.score.totalBeforeCap !== detail.score.total && (
+                      <p className="mt-2 text-sm text-muted">
+                        Сумма факторов {detail.score.totalBeforeCap}. На экране показано {detail.score.total}.
+                      </p>
+                    )}
                     <p className="mt-3 max-w-xl text-sm text-ink">{detail.score.reason}</p>
                     {(detail.score.stops?.fired?.length ?? 0) > 0 && (
                       <div className="mt-4 flex flex-wrap gap-2">

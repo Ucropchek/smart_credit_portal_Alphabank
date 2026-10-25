@@ -45,6 +45,84 @@ const productLabel: Record<string, string> = {
   'msp-subsidized': 'Льготный кредит МСП',
 }
 
+const scoreDecisionLabel: Record<string, string> = {
+  approve: 'Одобрение',
+  review: 'Разбор',
+  reject: 'Отказ',
+}
+
+const stopLabel: Record<string, string> = {
+  liquidated: 'Ликвидация',
+  overdue: 'Текущая просрочка в БКИ',
+  accountBlocked: 'Блокировка счёта',
+}
+
+function scoreTone(decision: string): 'ok' | 'warn' | 'danger' | 'info' {
+  if (decision === 'approve') return 'ok'
+  if (decision === 'reject') return 'danger'
+  if (decision === 'review') return 'warn'
+  return 'info'
+}
+
+function ScoreBreakdown({ score }: { score: NonNullable<ApplicationDetail['score']> }) {
+  const capped = typeof score.totalBeforeCap === 'number' && score.totalBeforeCap !== score.total
+
+  return (
+    <Card className="p-8">
+      <CardHeader
+        title="Скоринг"
+        subtitle="Баллы по карточке компании. Итог ограничен диапазоном от 0 до 100."
+        action={
+          <Badge tone={scoreTone(score.decision)} dot>
+            {scoreDecisionLabel[score.decision] ?? score.decision}
+          </Badge>
+        }
+      />
+      <div className="mt-6">
+        <div className="tnum text-[40px] leading-none font-semibold tracking-[-0.03em] text-ink">
+          {score.total}
+          <span className="text-xl text-muted">/100</span>
+        </div>
+        {capped && (
+          <p className="mt-2 text-sm text-muted">
+            Сумма факторов {score.totalBeforeCap}. На экране показано {score.total}.
+          </p>
+        )}
+        <p className="mt-3 max-w-xl text-sm text-ink">{score.reason}</p>
+        {(score.stops?.fired?.length ?? 0) > 0 && (
+          <div className="mt-4 flex flex-wrap gap-2">
+            {score.stops?.fired?.map((code) => (
+              <Badge key={code} tone="danger">
+                {stopLabel[code] ?? code}
+              </Badge>
+            ))}
+          </div>
+        )}
+        <ul className="mt-6 divide-y divide-line">
+          {score.points?.map((point) => (
+            <li key={point.factor} className="flex items-start justify-between gap-6 py-3">
+              <div>
+                <div className="text-sm font-medium text-ink">{point.title}</div>
+                <div className="mt-1 text-xs text-muted">{point.detail}</div>
+              </div>
+              <span
+                className={cx(
+                  'tnum shrink-0 text-sm font-semibold',
+                  point.points > 0 && 'text-ok',
+                  point.points < 0 && 'text-alfa',
+                  point.points === 0 && 'text-muted',
+                )}
+              >
+                {point.points > 0 ? `+${point.points}` : point.points}
+              </span>
+            </li>
+          ))}
+        </ul>
+      </div>
+    </Card>
+  )
+}
+
 function ScoreLimit({
   requestedAmount,
   product,
@@ -377,6 +455,8 @@ function LiveApplication({ number }: { number: number }) {
               <p className="mt-6 text-sm text-muted">Заявка принята. Банк ещё не начал проверку реестров и скоринг.</p>
             )}
           </Card>
+
+          {detail.score && <ScoreBreakdown score={detail.score} />}
 
           {detail.product && detail.counterOffer && (
             <ScoreLimit requestedAmount={detail.amount} product={detail.product} counter={detail.counterOffer} />
