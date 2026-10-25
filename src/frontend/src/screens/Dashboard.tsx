@@ -81,7 +81,22 @@ export function Dashboard({
   const overpay = payment * term - amount
   const purposeLabel = purposes.find((item) => item.id === purpose)?.label ?? 'Пополнение оборотных средств'
   const [saved, setSaved] = useState<ApplicationListItem[] | null>(null)
+  const [compare, setCompare] = useState(false)
+  const [listFilter, setListFilter] = useState<'all' | 'open' | 'decided'>('all')
   const onCountRef = useRef(onCount)
+  const offers = useMemo(
+    () =>
+      purposes.map((item) => {
+        const offer = recommend(item.id, amount, term)
+        return { ...item, offer, payment: Math.round(annuity(amount, offer.rate, term) / 100) * 100 }
+      }),
+    [amount, term],
+  )
+  const visible = saved?.filter((app) => {
+    if (listFilter === 'open') return !app.employeeDecision
+    if (listFilter === 'decided') return Boolean(app.employeeDecision)
+    return true
+  })
 
   useEffect(() => {
     onCountRef.current = onCount
@@ -223,22 +238,78 @@ export function Dashboard({
               Оформить заявку
               <Icon name="arrowRight" size={18} />
             </Button>
-            <Button type="button" size="lg" variant="secondary">
-              Сравнить
+            <Button type="button" size="lg" variant="secondary" onClick={() => setCompare((open) => !open)}>
+              {compare ? 'Скрыть' : 'Сравнить'}
             </Button>
           </div>
         </Card>
       </div>
+
+      {compare && (
+        <Card className="p-8">
+          <CardHeader title="Сравнение продуктов" subtitle="Платежи для текущих суммы и срока. Ставки предварительные" />
+          <div className="mt-6 grid grid-cols-3 gap-4">
+            {offers.map((item) => {
+              const selected = item.id === purpose
+              return (
+                <button
+                  key={item.id}
+                  type="button"
+                  onClick={() => setPurpose(item.id)}
+                  className={cx(
+                    'cursor-pointer rounded-2xl border p-5 text-left transition-colors',
+                    selected ? 'border-ink' : 'border-line hover:border-[#cfd4da]',
+                  )}
+                >
+                  <div className="flex items-center justify-between gap-3">
+                    <span className="text-xs text-muted">{item.label}</span>
+                    {selected && <Badge tone="ok">Выбрано</Badge>}
+                  </div>
+                  <div className="mt-3 text-[15px] font-semibold text-ink">{item.offer.name}</div>
+                  <div className="mt-1 text-sm text-muted">{item.offer.tag}</div>
+                  <div className="mt-4 flex items-end justify-between">
+                    <div>
+                      <div className="text-xs text-muted">Ставка</div>
+                      <div className="tnum mt-1 text-lg font-semibold text-ink">от {item.offer.rate.toLocaleString('ru-RU')}%</div>
+                    </div>
+                    <div className="text-right">
+                      <div className="text-xs text-muted">Платёж</div>
+                      <div className="tnum mt-1 text-lg font-semibold text-ink">{rub(item.payment)}</div>
+                    </div>
+                  </div>
+                </button>
+              )
+            })}
+          </div>
+        </Card>
+      )}
 
       <Card className="p-8">
         <CardHeader
           title="Активные заявки"
           subtitle="Статус рассмотрения в реальном времени"
           action={
-            <Button type="button" variant="secondary" size="sm">
-              <Icon name="filter" size={16} />
-              Все заявки
-            </Button>
+            <div className="flex gap-2">
+              {(
+                [
+                  ['all', 'Все'],
+                  ['open', 'Без решения'],
+                  ['decided', 'С решением'],
+                ] as const
+              ).map(([id, label]) => (
+                <button
+                  key={id}
+                  type="button"
+                  onClick={() => setListFilter(id)}
+                  className={cx(
+                    'h-9 cursor-pointer rounded-full border px-3.5 text-[13px] font-medium transition-colors',
+                    listFilter === id ? 'border-ink bg-ink text-white' : 'border-line bg-white text-ink hover:border-[#cfd4da]',
+                  )}
+                >
+                  {label}
+                </button>
+              ))}
+            </div>
           }
         />
         <div className="mt-6">
@@ -253,7 +324,10 @@ export function Dashboard({
           </div>
           {saved == null && <p className="py-8 text-sm text-muted">Загружаем заявки…</p>}
           {saved?.length === 0 && <p className="py-8 text-sm text-muted">Пока нет отправленных заявок</p>}
-          {saved?.map((app) => {
+          {saved && saved.length > 0 && visible?.length === 0 && (
+            <p className="py-8 text-sm text-muted">В этом списке заявок нет</p>
+          )}
+          {visible?.map((app) => {
             const progress = stepProgress[app.step] ?? 1
             const status = listStatus(app.employeeDecision, app.stepTitle)
             return (
