@@ -5,10 +5,13 @@ using System.Text.Json.Nodes;
 using Npgsql;
 using NpgsqlTypes;
 
-// Reads purpose keywords from the goods registry and posts the loan amount plus that JSON to ML.
+// Reads purpose keywords from the goods registry and posts the loan purpose text,
+// the amount and the matched categories to ML.
 static class PurposeHandoff
 {
     public const string HttpClientName = "ml";
+
+    const int MaxEnding = 3;
 
     static readonly JsonSerializerOptions Json = new(JsonSerializerDefaults.Web);
 
@@ -31,7 +34,7 @@ static class PurposeHandoff
                 return;
 
             var matches = await MatchAsync(dataSource, purpose);
-            categoryJson = JsonSerializer.Serialize(new { matches }, Json);
+            categoryJson = JsonSerializer.Serialize(new { purpose, matches }, Json);
             var baseUrl = configuration["Ml:BaseUrl"]?.Trim();
             if (string.IsNullOrEmpty(baseUrl))
             {
@@ -44,6 +47,7 @@ static class PurposeHandoff
                 {
                     applicationId,
                     amount,
+                    purpose,
                     category = JsonSerializer.Deserialize<JsonElement>(categoryJson)
                 }, Json);
                 try
@@ -122,10 +126,15 @@ static class PurposeHandoff
         return value is true;
     }
 
+    sealed record Hit(string Keyword, int Start, int End);
+
+    sealed record Row(string Code, string Title, List<Hit> Hits);
+
     static async Task<List<object>> MatchAsync(NpgsqlDataSource dataSource, string purpose)
     {
         var text = Normalize(purpose);
-        var found = new List<(string Code, string Title, List<string> Hits)>();
+        var words = Words(text);
+        var found = new List<Row>();
         await using var command = dataSource.CreateCommand(
             """
             select code, title, keywords
@@ -138,15 +147,26 @@ static class PurposeHandoff
             var code = reader.GetString(0);
             var title = reader.GetString(1);
             var keywords = reader.GetFieldValue<string[]>(2);
-            var hits = keywords.Where(keyword => ContainsWord(text, Normalize(keyword))).Distinct().ToList();
+            var hits = new List<Hit>();
+            foreach (var keyword in keywords.Distinct(StringComparer.Ordinal))
+            {
+                if (TrySpan(text, words, Normalize(keyword), out var start, out var end))
+                    hits.Add(new Hit(keyword, start, end));
+            }
             if (hits.Count > 0)
-                found.Add((code, title, hits));
+                found.Add(new Row(code, title, hits));
         }
 
+        found = DropCovered(found);
         return found
             .OrderByDescending(row => row.Hits.Count)
             .ThenBy(row => row.Code, StringComparer.Ordinal)
-            .Select(row => (object)new { code = row.Code, title = row.Title, keywords = row.Hits })
+            .Select(row => (object)new
+            {
+                code = row.Code,
+                title = row.Title,
+                keywords = row.Hits.Select(hit => hit.Keyword).Distinct(StringComparer.Ordinal).ToList()
+            })
             .ToList();
     }
 
@@ -273,26 +293,78 @@ static class PurposeHandoff
         return uri.AbsoluteUri;
     }
 
-    static string Normalize(string value) =>
-        value.ToLowerInvariant().Replace('ё', 'е');
-
-    // A stem matches the start of a word. "зерно" must not fire inside "фрезерного".
-    static bool ContainsWord(string text, string keyword)
+    // A short category is dropped when every hit sits inside a longer hit of another category.
+    static List<Row> DropCovered(List<Row> found)
     {
-        if (keyword.Length == 0)
+        return found.Where(item => !item.Hits.All(hit =>
+            found.Any(other => other.Code != item.Code && other.Hits.Any(span =>
+                span.Start <= hit.Start
+                && span.End >= hit.End
+                && span.End - span.Start > hit.End - hit.Start)))).ToList();
+    }
+
+    static bool TrySpan(string text, List<(int Start, int End)> words, string keyword, out int start, out int end)
+    {
+        start = 0;
+        end = 0;
+        var parts = keyword.Split(' ', StringSplitOptions.RemoveEmptyEntries);
+        if (parts.Length == 0 || words.Count < parts.Length)
             return false;
-        var start = 0;
-        while (start <= text.Length - keyword.Length)
+
+        for (var i = 0; i <= words.Count - parts.Length; i++)
         {
-            var index = text.IndexOf(keyword, start, StringComparison.Ordinal);
-            if (index < 0)
-                return false;
-            if (index == 0 || !char.IsLetter(text[index - 1]))
-                return true;
-            start = index + 1;
+            var matched = true;
+            for (var part = 0; part < parts.Length; part++)
+            {
+                var word = words[i + part];
+                if (!TokenMatches(text, word.Start, word.End, parts[part]))
+                {
+                    matched = false;
+                    break;
+                }
+            }
+            if (!matched)
+                continue;
+            start = words[i].Start;
+            end = words[i + parts.Length - 1].End;
+            return true;
         }
         return false;
     }
+
+    // The keyword must start a word. A short grammatical ending is allowed.
+    // «зерно» matches «зерна» and does not match «зерноуборочного».
+    static bool TokenMatches(string text, int start, int end, string keyword)
+    {
+        var length = end - start;
+        if (keyword.Length == 0 || length < keyword.Length || length - keyword.Length > MaxEnding)
+            return false;
+        return text.AsSpan(start, keyword.Length).Equals(keyword, StringComparison.Ordinal);
+    }
+
+    static List<(int Start, int End)> Words(string text)
+    {
+        var words = new List<(int Start, int End)>();
+        var i = 0;
+        while (i < text.Length)
+        {
+            if (!IsWordChar(text[i]))
+            {
+                i++;
+                continue;
+            }
+            var start = i;
+            while (i < text.Length && IsWordChar(text[i]))
+                i++;
+            words.Add((start, i));
+        }
+        return words;
+    }
+
+    static bool IsWordChar(char value) => char.IsLetterOrDigit(value) || value == '-';
+
+    static string Normalize(string value) =>
+        value.ToLowerInvariant().Replace('ё', 'е');
 
     static string Trim(string message) =>
         message.Length <= 500 ? message : message[..500];

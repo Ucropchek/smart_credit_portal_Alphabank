@@ -129,6 +129,8 @@ INSERT INTO categories (code, title, keywords) VALUES
     ('tire-changer', 'Шиномонтажный станок', ARRAY['шиномонтажный станок']),
     ('tractor', 'Трактор', ARRAY['трактор']),
     ('combine', 'Комбайн', ARRAY['комбайн']),
+    ('grain-harvester', 'Зерноуборочный комбайн', ARRAY['зерноуборочн комбайн', 'зерноуборочн']),
+    ('header', 'Жатка', ARRAY['жатк']),
     ('seeder', 'Сеялка', ARRAY['сеялк']),
     ('plow', 'Плуг', ARRAY['плуг']),
     ('cultivator', 'Культиватор', ARRAY['культиватор']),
