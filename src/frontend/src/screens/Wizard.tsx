@@ -1,5 +1,5 @@
-import { useRef, useState } from 'react'
-import { createApplication, type LoanDraft } from '../api/applications'
+import { useEffect, useRef, useState } from 'react'
+import { createApplication, matchPurpose, type LoanDraft, type PurposeMatch } from '../api/applications'
 import { useBkiConsent } from '../api/bkiConsent'
 import { lookupBusiness, mspProfile, registrationId, type BusinessCard, type BkiObligation } from '../api/businesses'
 import { entrepreneurName, hasRegistryRecord, lookupCompany, type CompanyLookup } from '../api/companies'
@@ -253,9 +253,34 @@ function consentText(link: 'connecting' | 'open' | 'closed', saved: boolean | nu
   return 'Отметка ещё не записана. Она живёт, пока открыта эта страница.'
 }
 
+function PurposeMatchList({
+  purpose,
+  matched,
+}: {
+  purpose: string
+  matched: { text: string; matches: PurposeMatch[]; failed: boolean } | null
+}) {
+  const asked = purpose.trim()
+  if (asked.length < 2) return null
+  const current = matched?.text === asked ? matched : null
+  if (!current) return <p className="mt-3 text-sm text-muted">Смотрим справочник товаров…</p>
+  if (current.failed) return <p className="mt-3 text-sm text-alfa">Не удалось разобрать цель</p>
+  if (current.matches.length === 0) return <p className="mt-3 text-sm text-muted">По этому тексту конкретные категории не нашлись.</p>
+  return (
+    <ul className="mt-4 flex flex-wrap gap-2">
+      {current.matches.map((item) => (
+        <li key={item.code} className="rounded-full bg-canvas px-3 py-1.5 text-xs font-medium text-ink">
+          {item.title}
+        </li>
+      ))}
+    </ul>
+  )
+}
+
 export function Wizard({ initial, onSubmit }: { initial: LoanDraft; onSubmit: (number: number) => void }) {
   const consent = useBkiConsent()
   const [purpose, setPurpose] = useState(initial.purpose)
+  const [matchedPurpose, setMatchedPurpose] = useState<{ text: string; matches: PurposeMatch[]; failed: boolean } | null>(null)
   const [amount, setAmount] = useState(initial.amount)
   const [termMonths, setTermMonths] = useState(initial.termMonths)
   const [inn, setInn] = useState('7701234567')
@@ -271,6 +296,25 @@ export function Wizard({ initial, onSubmit }: { initial: LoanDraft; onSubmit: (n
   const [sending, setSending] = useState(false)
   const [submitError, setSubmitError] = useState<string | null>(null)
   const fileRef = useRef<HTMLInputElement>(null)
+
+  useEffect(() => {
+    const text = purpose.trim()
+    if (text.length < 2) return
+    let cancel = false
+    const timer = window.setTimeout(() => {
+      matchPurpose(text)
+        .then((matches) => {
+          if (!cancel) setMatchedPurpose({ text, matches, failed: false })
+        })
+        .catch(() => {
+          if (!cancel) setMatchedPurpose({ text, matches: [], failed: true })
+        })
+    }, 350)
+    return () => {
+      cancel = true
+      window.clearTimeout(timer)
+    }
+  }, [purpose])
 
   const runEnrich = async () => {
     const digits = inn.replace(/\D/g, '')
@@ -400,6 +444,7 @@ export function Wizard({ initial, onSubmit }: { initial: LoanDraft; onSubmit: (n
             placeholder="Например, покупка оборудования для цеха"
           />
         </label>
+        <PurposeMatchList purpose={purpose} matched={matchedPurpose} />
       </Card>
 
       <div className="grid grid-cols-12 gap-6">

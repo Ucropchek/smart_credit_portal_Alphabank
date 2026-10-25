@@ -112,6 +112,21 @@ export function purposeMatches(category: ApplicationDetail['purposeCategory']): 
   })
 }
 
+export async function matchPurpose(purpose: string): Promise<PurposeMatch[]> {
+  const response = await fetch('/applications/purpose-categories', {
+    method: 'POST',
+    headers: { 'content-type': 'application/json' },
+    body: JSON.stringify({ purpose }),
+    signal: AbortSignal.timeout(8000),
+  })
+  const body: unknown = await response.json().catch(() => null)
+  if (!response.ok || !body || typeof body !== 'object') {
+    const message = body && typeof body === 'object' && 'error' in body && typeof body.error === 'string' ? body.error : 'Не удалось разобрать цель'
+    throw new Error(message)
+  }
+  return purposeMatches(body as ApplicationDetail['purposeCategory'])
+}
+
 export type TurnoverMonth = {
   month: string
   incoming: number
@@ -160,6 +175,7 @@ export type RegistrySnapshot = {
   }
   bki: Array<{
     inn: string
+    whose?: string | string[]
     debtOverdueSum: number
     debtSum: number
     obligationSum: number

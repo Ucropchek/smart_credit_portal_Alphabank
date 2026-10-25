@@ -11,6 +11,7 @@ static class ApplicationRoutes
     public static void Map(WebApplication app)
     {
         app.MapGet("/applications", ListAsync);
+        app.MapPost("/applications/purpose-categories", MatchPurposeAsync);
         app.MapGet("/applications/{number:long}", DetailAsync);
         app.MapGet("/applications/{number:long}/requests", ListRequestsAsync);
         app.MapPost("/applications/{number:long}/requests", CreateRequestAsync);
@@ -19,6 +20,25 @@ static class ApplicationRoutes
         app.MapPost("/applications/{number:long}/registry-check", RegistryCheckAsync);
         app.MapPost("/applications/{number:long}/score", ScoreAsync);
         app.MapPost("/applications/{number:long}/decision", DecisionAsync);
+    }
+
+    static async Task<IResult> MatchPurposeAsync(JsonElement? body, NpgsqlDataSource dataSource)
+    {
+        var purpose = ReadText(body, "purpose", "text");
+        if (purpose is null)
+            return Results.BadRequest(new { error = "purpose is required" });
+        if (purpose.Length > 1000)
+            return Results.BadRequest(new { error = "purpose must be at most 1000 characters" });
+
+        try
+        {
+            var matches = await PurposeHandoff.MatchPurposeAsync(dataSource, purpose);
+            return Results.Ok(new { matches });
+        }
+        catch (PostgresException ex) when (ex.SqlState is "3F000" or "42P01")
+        {
+            return Results.Json(new { error = "goods registry is unavailable" }, statusCode: StatusCodes.Status503ServiceUnavailable);
+        }
     }
 
     static async Task<IResult> ListAsync(NpgsqlDataSource dataSource, PortalSchema portal)

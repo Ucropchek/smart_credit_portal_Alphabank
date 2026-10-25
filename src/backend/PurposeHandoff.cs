@@ -148,6 +148,9 @@ static class PurposeHandoff
             .ToList();
     }
 
+    public static Task<List<object>> MatchPurposeAsync(NpgsqlDataSource dataSource, string purpose) =>
+        MatchAsync(dataSource, purpose);
+
     static string Normalize(string value) =>
         value.ToLowerInvariant().Replace('ё', 'е');
 

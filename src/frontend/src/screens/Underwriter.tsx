@@ -50,6 +50,25 @@ type Outcome = (typeof outcomes)[number]['id']
 
 const questionPresets = ['Выписка по счёту за последний квартал', 'Договоры с основными контрагентами']
 
+const bkiRoleName: Record<string, string> = {
+  company: 'Компания',
+  entrepreneur: 'Предприниматель',
+  director: 'Руководитель',
+  founder: 'Учредитель',
+}
+
+const bkiScheduleName: Record<string, string> = {
+  '1': 'Срок платежа не наступил',
+  '2': 'Платежи вовремя',
+  '3': 'Платежи с просрочкой',
+}
+
+function bkiRole(whose: string | string[] | undefined) {
+  const roles = whose == null ? [] : Array.isArray(whose) ? whose : [whose]
+  const label = roles.map((role) => bkiRoleName[role] ?? role).join(', ')
+  return label || 'Субъект'
+}
+
 const procedureName: Record<string, string> = {
   FinancialRecovery: 'Финансовое оздоровление',
   ExternalManagement: 'Внешнее управление',
@@ -90,16 +109,36 @@ function RegistryFacts({ registries }: { registries: RegistrySnapshot }) {
         : `${registries.bki.length} дог. · просрочка ${rub(overdue)}`
 
   return (
-    <div className="mt-6 grid grid-cols-2 gap-x-8 gap-y-5">
-      <KV k="МСП" v={msp || 'В реестре'} />
-      <KV k="Банкротство" v={bankruptcy} />
-      <KV k="Залог" v={registries.fedresurs.pledgeActive ? 'Есть' : 'Нет'} />
-      <KV k="Иски к ответчику" v={`${registries.arbitration.openDefendantCases} · ${rub(registries.arbitration.openClaimSum)}`} mono />
-      <KV k="Налоговая задолженность" v={registries.fns.arrearsTotal == null ? 'Нет данных' : rub(registries.fns.arrearsTotal)} mono />
-      <KV k="Блокировка счёта" v={registries.fns.accountBlocked == null ? 'Нет данных' : registries.fns.accountBlocked ? 'Есть' : 'Нет'} />
-      <KV k="БКИ" v={bki} />
-      {flags.length > 0 && <KV k="Флаги ФНС" v={flags.join(', ')} />}
-    </div>
+    <>
+      <div className="mt-6 grid grid-cols-2 gap-x-8 gap-y-5">
+        <KV k="МСП" v={msp || 'В реестре'} />
+        <KV k="Банкротство" v={bankruptcy} />
+        <KV k="Залог" v={registries.fedresurs.pledgeActive ? 'Есть' : 'Нет'} />
+        <KV k="Иски к ответчику" v={`${registries.arbitration.openDefendantCases} · ${rub(registries.arbitration.openClaimSum)}`} mono />
+        <KV k="Налоговая задолженность" v={registries.fns.arrearsTotal == null ? 'Нет данных' : rub(registries.fns.arrearsTotal)} mono />
+        <KV k="Блокировка счёта" v={registries.fns.accountBlocked == null ? 'Нет данных' : registries.fns.accountBlocked ? 'Есть' : 'Нет'} />
+        <KV k="БКИ" v={bki} />
+        {flags.length > 0 && <KV k="Флаги ФНС" v={flags.join(', ')} />}
+      </div>
+      {registries.bki && <BkiContracts rows={registries.bki} />}
+    </>
+  )
+}
+
+function BkiContracts({ rows }: { rows: NonNullable<RegistrySnapshot['bki']> }) {
+  if (rows.length === 0) return null
+  return (
+    <ul className="mt-6 space-y-3">
+      {rows.map((row, index) => (
+        <li key={`${row.inn}-${index}`} className="rounded-xl border border-line px-4 py-3">
+          <div className="text-sm font-medium text-ink">{bkiRole(row.whose)}</div>
+          <div className="mt-1 text-sm text-muted">
+            ИНН {row.inn} · просрочка {rub(row.debtOverdueSum)} · долг {rub(row.debtSum)} ·{' '}
+            {bkiScheduleName[row.scheduleCode ?? ''] ?? 'Код срока не указан'}
+          </div>
+        </li>
+      ))}
+    </ul>
   )
 }
 
