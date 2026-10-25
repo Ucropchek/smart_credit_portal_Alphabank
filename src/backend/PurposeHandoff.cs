@@ -40,6 +40,7 @@ static class PurposeHandoff
             {
                 var payload = JsonSerializer.Serialize(new
                 {
+                    applicationId,
                     amount,
                     category = JsonSerializer.Deserialize<JsonElement>(categoryJson)
                 }, Json);
