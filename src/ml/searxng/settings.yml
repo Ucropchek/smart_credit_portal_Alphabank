@@ -1,0 +1,19 @@
+# SearXNG for the product search. Defaults plus the JSON output the ML service reads.
+# Only the ML container talks to it; the port is published for local debugging.
+use_default_settings: true
+
+general:
+  instance_name: "smart-credit-search"
+
+search:
+  safe_search: 1
+  default_lang: "ru-RU"
+  formats:
+    - html
+    - json
+
+server:
+  # Local prototype key. Change it outside a developer machine.
+  secret_key: "smart-credit-local-only"
+  limiter: false
+  image_proxy: false

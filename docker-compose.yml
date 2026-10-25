@@ -1,6 +1,7 @@
 # Backend API and the shared Postgres server.
 # Database ml is created by POSTGRES_DB. src/postgres/initdb applies src/ml/sql to it.
 # Database registries is created by src/registries/init-registries.sh.
+# ML service (product search) uses Ollama and SearXNG. The first start downloads the Qwen model (~3 GB).
 # Frontend stays a local Vite dev server: cd src/frontend && npm install && npm run dev
 
 name: smart-credit-portal
@@ -14,6 +15,8 @@ services:
     environment:
       ASPNETCORE_ENVIRONMENT: Development
       ASPNETCORE_URLS: http://+:8080
+      # PurposeHandoff posts here. Outside Compose appsettings.json points at http://localhost:8000.
+      Ml__BaseUrl: http://ml:8000
 
   postgres:
     image: postgres:16-alpine
@@ -34,5 +37,66 @@ services:
       timeout: 5s
       retries: 10
 
+  # Product search: Qwen 3.5 in Ollama reads the pages, SearXNG finds them.
+  ml:
+    build:
+      context: ./src/ml
+    restart: unless-stopped
+    ports:
+      - "8000:8000"
+    healthcheck:
+      test: ["CMD", "python", "-c", "import urllib.request; urllib.request.urlopen('http://127.0.0.1:8000/health', timeout=3)"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+      start_period: 15s
+    environment:
+      ML_SEARXNG_URL: http://searxng:8080
+      ML_OLLAMA_URL: http://ollama:11434
+      ML_LLM_MODEL: ${ML_LLM_MODEL:-qwen3.5:4b}
+      # Goods search jobs from the backend handoff are stored in database ml.
+      ML_POSTGRES_HOST: postgres
+      ML_POSTGRES_PORT: "5432"
+      ML_POSTGRES_USER: ${ML_POSTGRES_USER:-ml}
+      ML_POSTGRES_PASSWORD: ${ML_POSTGRES_PASSWORD:-change-me}
+      ML_POSTGRES_DB: ${ML_POSTGRES_DB:-ml}
+    depends_on:
+      postgres:
+        condition: service_healthy
+      searxng:
+        condition: service_started
+      ollama-pull:
+        condition: service_completed_successfully
+
+  searxng:
+    image: searxng/searxng:2026.10.17-2a6fc07be
+    ports:
+      - "8888:8080"
+    volumes:
+      - ./src/ml/searxng/settings.yml:/etc/searxng/settings.yml:ro
+
+  ollama:
+    image: ollama/ollama:0.40.9
+    ports:
+      - "11434:11434"
+    volumes:
+      - ollama-data:/root/.ollama
+    healthcheck:
+      test: ["CMD", "ollama", "list"]
+      interval: 5s
+      timeout: 5s
+      retries: 20
+
+  # Downloads the model once into ollama-data, then exits. Later starts find it in place.
+  ollama-pull:
+    image: ollama/ollama:0.40.9
+    environment:
+      OLLAMA_HOST: http://ollama:11434
+    command: ["pull", "${ML_LLM_MODEL:-qwen3.5:4b}"]
+    depends_on:
+      ollama:
+        condition: service_healthy
+
 volumes:
   postgres-data:
+  ollama-data:

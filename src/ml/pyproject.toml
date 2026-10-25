@@ -9,10 +9,20 @@ description = "ML package. Its PostgreSQL database is separate from the product 
 requires-python = ">=3.11"
 dependencies = [
   "psycopg[binary]>=3.2",
+  "httpx>=0.28,<1",
+  "fastapi>=0.115,<1",
+  "uvicorn>=0.32,<1",
 ]
+
+[project.optional-dependencies]
+test = ["pytest>=8"]
 
 [project.scripts]
 smart-credit-ml = "smart_credit_ml.main:main"
+smart-credit-products = "smart_credit_ml.product_search.cli:main"
 
 [tool.setuptools.packages.find]
 where = ["src"]
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]

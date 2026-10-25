@@ -1,5 +1,3 @@
-"""Show the ML PostgreSQL settings and the SQL scripts this package expects."""
-
 from __future__ import annotations
 
 import os
