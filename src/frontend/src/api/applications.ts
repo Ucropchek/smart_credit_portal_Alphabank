@@ -97,6 +97,7 @@ export type ApplicationDetail = {
     obligations: number | null
     employees: number | null
   }
+  documents?: { name: string; kind: string }[]
   purposeCategory?: {
     matches?: PurposeMatch[]
   } | null
@@ -206,6 +207,7 @@ export async function createApplication(
     annualRevenue?: number
     obligations?: number
     employees?: number
+    documents?: { name: string; kind: string }[]
   },
 ): Promise<CreatedApplication> {
   const response = await fetch('/applications', {

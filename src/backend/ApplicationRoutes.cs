@@ -423,7 +423,8 @@ static class ApplicationRoutes
                    employee_decision, employee_reason, employee_decided_at,
                    statement_consent,
                    purpose_category::text, purpose_handoff_ok, purpose_handoff_error,
-                   annual_revenue, obligations, employees
+                   annual_revenue, obligations, employees,
+                   documents::text
             from portal.applications
             where id = @id
             """);
@@ -466,6 +467,7 @@ static class ApplicationRoutes
         decimal? annualRevenue = reader.IsDBNull(32) ? null : reader.GetDecimal(32);
         decimal? obligations = reader.IsDBNull(33) ? null : reader.GetDecimal(33);
         int? employees = reader.IsDBNull(34) ? null : reader.GetInt32(34);
+        var documentsJson = NullableText(reader, 35);
         await reader.CloseAsync();
 
         var names = await BusinessNamesAsync(dataSource, [registrationId]);
@@ -576,6 +578,9 @@ static class ApplicationRoutes
                 employees
             };
         }
+
+        if (documentsJson is not null)
+            detail["documents"] = ParseNode(documentsJson);
 
         if (purposeCategory is not null || handoffOk is not null)
         {

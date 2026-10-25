@@ -1144,6 +1144,7 @@ app.MapPost("/applications", async (ApplicationRequest? request, NpgsqlDataSourc
         problems.Add("obligations must be a non-negative number of roubles with at most 2 decimal places");
     if (request.Employees is < 0 or > 1_000_000)
         problems.Add("employees must be a whole number from 0 to 1000000");
+    problems.AddRange(DocumentProblems(request.Documents));
     if (problems.Count > 0)
         return Results.BadRequest(new { error = string.Join("; ", problems) });
 
@@ -1152,9 +1153,9 @@ app.MapPost("/applications", async (ApplicationRequest? request, NpgsqlDataSourc
     await using var command = dataSource.CreateCommand(
         """
         insert into portal.applications (
-            purpose, amount, term_months, inn, registration_id, annual_revenue, obligations, employees)
+            purpose, amount, term_months, inn, registration_id, annual_revenue, obligations, employees, documents)
         values (
-            @purpose, @amount, @termMonths, @inn, @registrationId, @annualRevenue, @obligations, @employees)
+            @purpose, @amount, @termMonths, @inn, @registrationId, @annualRevenue, @obligations, @employees, @documents)
         returning id, step, submitted_at
         """);
     command.Parameters.AddWithValue("purpose", purpose!);
@@ -1165,6 +1166,15 @@ app.MapPost("/applications", async (ApplicationRequest? request, NpgsqlDataSourc
     command.Parameters.Add(new NpgsqlParameter("annualRevenue", NpgsqlDbType.Numeric) { Value = (object?)request.AnnualRevenue ?? DBNull.Value });
     command.Parameters.Add(new NpgsqlParameter("obligations", NpgsqlDbType.Numeric) { Value = (object?)request.Obligations ?? DBNull.Value });
     command.Parameters.Add(new NpgsqlParameter("employees", NpgsqlDbType.Integer) { Value = (object?)request.Employees ?? DBNull.Value });
+    var markedDocuments = request.Documents?
+        .Select(item => new { name = item.Name!.Trim(), kind = item.Kind!.Trim() })
+        .ToArray();
+    command.Parameters.Add(new NpgsqlParameter("documents", NpgsqlDbType.Jsonb)
+    {
+        Value = markedDocuments is { Length: > 0 }
+            ? JsonSerializer.Serialize(markedDocuments, JsonSerializerOptions.Web)
+            : DBNull.Value
+    });
     await using var reader = await command.ExecuteReaderAsync();
     await reader.ReadAsync();
 
@@ -1193,6 +1203,25 @@ app.Run();
 
 static bool IsDeclaredMoney(decimal value) =>
     value >= 0 && value == decimal.Round(value, 2) && value < 10_000_000_000_000m;
+
+static List<string> DocumentProblems(DeclaredDocument[]? documents)
+{
+    var problems = new List<string>();
+    if (documents is null)
+        return problems;
+    if (documents.Length > 20)
+        problems.Add("documents must contain at most 20 items");
+    for (var index = 0; index < documents.Length; index++)
+    {
+        var name = documents[index].Name?.Trim();
+        var kind = documents[index].Kind?.Trim();
+        if (string.IsNullOrEmpty(name) || name.Length > 200)
+            problems.Add($"documents[{index}].name must be 1 to 200 characters");
+        if (string.IsNullOrEmpty(kind) || kind.Length > 200)
+            problems.Add($"documents[{index}].kind must be 1 to 200 characters");
+    }
+    return problems;
+}
 
 // Last BKI checkbox event of every open /bki-consent connection. Checked is null until the first click.
 sealed class BkiConsentStore
@@ -1274,7 +1303,10 @@ sealed record ApplicationRequest(
     string? RegistrationId,
     decimal? AnnualRevenue = null,
     decimal? Obligations = null,
-    int? Employees = null);
+    int? Employees = null,
+    DeclaredDocument[]? Documents = null);
+
+sealed record DeclaredDocument(string? Name, string? Kind);
 
 // Tracking steps the client sees. Titles match the tracker screen.
 static class ApplicationSteps
@@ -1376,6 +1408,9 @@ sealed class PortalSchema(NpgsqlDataSource dataSource)
                 alter table portal.applications
                     add constraint ck_applications_employees
                     check (employees is null or employees >= 0);
+
+                alter table portal.applications
+                    add column if not exists documents jsonb;
 
                 alter table portal.applications
                     drop constraint if exists ck_applications_employee_decision;

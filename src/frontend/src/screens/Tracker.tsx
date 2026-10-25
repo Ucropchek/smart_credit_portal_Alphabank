@@ -1,6 +1,7 @@
 import { useEffect, useState } from 'react'
 import { answerApplication, getApplication, purposeMatches, saveStatement, type ApplicationDetail } from '../api/applications'
 import { cx } from '../components/cx'
+import { DocumentsCard } from '../components/DocumentsCard'
 import { FinancesCard } from '../components/FinancesCard'
 import { Icon } from '../components/Icon'
 import type { Scenario } from '../components/Shell'
@@ -269,6 +270,13 @@ function LiveApplication({ number }: { number: number }) {
               finances={detail.finances}
               amount={detail.amount}
               subtitle="Цифры, которые вы указали при подаче"
+            />
+          )}
+
+          {(detail.documents?.length ?? 0) > 0 && (
+            <DocumentsCard
+              documents={detail.documents ?? []}
+              subtitle="Названия файлов из формы. Содержимое на сервер не отправлялось"
             />
           )}
 

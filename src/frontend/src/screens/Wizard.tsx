@@ -386,6 +386,7 @@ export function Wizard({ initial, onSubmit }: { initial: LoanDraft; onSubmit: (n
     try {
       const revenueDigits = revenue.replace(/\D/g, '')
       const debtDigits = debt.replace(/\D/g, '')
+      const marked = docs.filter((doc) => doc.state === 'ok').map((doc) => ({ name: doc.name, kind: doc.kind }))
       const created = await createApplication({
         purpose: purpose.trim(),
         amount,
@@ -395,6 +396,7 @@ export function Wizard({ initial, onSubmit }: { initial: LoanDraft; onSubmit: (n
         ...(revenueDigits ? { annualRevenue: Number(revenueDigits) } : {}),
         ...(debtDigits ? { obligations: Number(debtDigits) } : {}),
         ...(/^\d+$/.test(employees) ? { employees: Number(employees) } : {}),
+        ...(marked.length ? { documents: marked } : {}),
       })
       onSubmit(created.number)
     } catch (error) {

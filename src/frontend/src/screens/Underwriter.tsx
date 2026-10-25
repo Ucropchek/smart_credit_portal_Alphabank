@@ -14,6 +14,7 @@ import {
   type RegistrySnapshot,
 } from '../api/applications'
 import { cx } from '../components/cx'
+import { DocumentsCard } from '../components/DocumentsCard'
 import { FinancesCard } from '../components/FinancesCard'
 import { Badge, Button, Card, CardHeader, KV } from '../components/ui'
 import { monthLabel, months, rub } from '../format'
@@ -463,6 +464,13 @@ export function Underwriter({ onCount }: { onCount?: (count: number) => void }) 
                   finances={detail.finances}
                   amount={detail.amount}
                   subtitle="Клиент указал их при подаче. Реестр эти цифры не подтверждал"
+                />
+              )}
+
+              {(detail.documents?.length ?? 0) > 0 && (
+                <DocumentsCard
+                  documents={detail.documents ?? []}
+                  subtitle="Клиент указал эти названия. Содержимое файлов не сохранялось"
                 />
               )}
 
