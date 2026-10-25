@@ -234,6 +234,73 @@ export async function listApplications(): Promise<ApplicationListItem[]> {
   return body.filter(isListItem)
 }
 
+export type GoodsOffer = {
+  name: string
+  url: string
+  priceRub: number
+}
+
+export type GoodsCategory = {
+  code: string
+  title: string
+  offers: GoodsOffer[]
+  overBudget: GoodsOffer[]
+}
+
+export type GoodsStatus = 'absent' | 'unavailable' | 'queued' | 'running' | 'done' | 'failed' | 'no_categories'
+
+export type GoodsSearch = {
+  status: GoodsStatus
+  categories: GoodsCategory[]
+}
+
+const goodsStatuses = new Set<GoodsStatus>(['absent', 'unavailable', 'queued', 'running', 'done', 'failed', 'no_categories'])
+
+function isGoodsOffer(value: unknown): value is GoodsOffer {
+  if (!value || typeof value !== 'object') return false
+  const row = value as Record<string, unknown>
+  if (typeof row.name !== 'string' || typeof row.url !== 'string' || typeof row.priceRub !== 'number') return false
+  if (!Number.isFinite(row.priceRub) || row.priceRub < 0) return false
+  try {
+    const url = new URL(row.url)
+    return url.protocol === 'http:' || url.protocol === 'https:'
+  } catch {
+    return false
+  }
+}
+
+function readOffers(value: unknown): GoodsOffer[] {
+  if (!Array.isArray(value)) return []
+  return value.filter(isGoodsOffer).slice(0, 30)
+}
+
+function isGoodsSearch(value: unknown): value is GoodsSearch {
+  if (!value || typeof value !== 'object') return false
+  const row = value as Record<string, unknown>
+  if (typeof row.status !== 'string' || !goodsStatuses.has(row.status as GoodsStatus)) return false
+  if (!Array.isArray(row.categories)) return false
+  return row.categories.every((category) => {
+    if (!category || typeof category !== 'object') return false
+    const item = category as Record<string, unknown>
+    return typeof item.code === 'string' && typeof item.title === 'string'
+  })
+}
+
+export async function getGoods(number: number): Promise<GoodsSearch> {
+  const response = await fetch(`/applications/${number}/goods`, { signal: AbortSignal.timeout(8000) })
+  const body: unknown = await response.json().catch(() => null)
+  if (!response.ok || !isGoodsSearch(body)) throw new Error('goods request failed')
+  return {
+    status: body.status,
+    categories: body.categories.map((category) => ({
+      code: category.code,
+      title: category.title,
+      offers: readOffers(category.offers),
+      overBudget: readOffers(category.overBudget),
+    })),
+  }
+}
+
 export async function getApplication(number: number, view: 'client' | 'bank' = 'client'): Promise<ApplicationDetail> {
   const query = view === 'client' ? '?view=client' : ''
   const response = await fetch(`/applications/${number}${query}`, { signal: AbortSignal.timeout(8000) })

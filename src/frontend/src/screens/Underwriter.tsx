@@ -16,6 +16,7 @@ import {
 import { cx } from '../components/cx'
 import { DocumentsCard } from '../components/DocumentsCard'
 import { FinancesCard } from '../components/FinancesCard'
+import { GoodsCard } from '../components/GoodsCard'
 import { Badge, Button, Card, CardHeader, KV } from '../components/ui'
 import { monthLabel, months, rub } from '../format'
 
@@ -481,6 +482,12 @@ export function Underwriter({
               )}
 
               <PurposeFacts detail={detail} />
+
+              <GoodsCard
+                key={detail.number}
+                number={detail.number}
+                subtitle="Поиск по категориям из справочника. Ссылка ведёт на витрину магазина."
+              />
 
               <Card className="p-8">
                 <CardHeader

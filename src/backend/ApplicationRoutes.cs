@@ -13,6 +13,7 @@ static class ApplicationRoutes
         app.MapGet("/applications", ListAsync);
         app.MapPost("/applications/purpose-categories", MatchPurposeAsync);
         app.MapGet("/applications/{number:long}", DetailAsync);
+        app.MapGet("/applications/{number:long}/goods", GoodsAsync);
         app.MapGet("/applications/{number:long}/requests", ListRequestsAsync);
         app.MapPost("/applications/{number:long}/requests", CreateRequestAsync);
         app.MapPost("/applications/{number:long}/requests/{requestId:long}/answer", AnswerRequestAsync);
@@ -39,6 +40,21 @@ static class ApplicationRoutes
         {
             return Results.Json(new { error = "goods registry is unavailable" }, statusCode: StatusCodes.Status503ServiceUnavailable);
         }
+    }
+
+    static async Task<IResult> GoodsAsync(
+        long number,
+        NpgsqlDataSource dataSource,
+        PortalSchema portal,
+        IHttpClientFactory httpClientFactory,
+        IConfiguration configuration)
+    {
+        await portal.EnsureAsync();
+        await using var command = dataSource.CreateCommand("select 1 from portal.applications where id = @id");
+        command.Parameters.AddWithValue("id", number);
+        if (await command.ExecuteScalarAsync() is null)
+            return Results.NotFound(new { error = "application not found" });
+        return await PurposeHandoff.ReadGoodsAsync(httpClientFactory, configuration, number);
     }
 
     static async Task<IResult> ListAsync(NpgsqlDataSource dataSource, PortalSchema portal)

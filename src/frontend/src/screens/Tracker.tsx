@@ -3,6 +3,7 @@ import { answerApplication, getApplication, purposeMatches, saveStatement, type 
 import { cx } from '../components/cx'
 import { DocumentsCard } from '../components/DocumentsCard'
 import { FinancesCard } from '../components/FinancesCard'
+import { GoodsCard } from '../components/GoodsCard'
 import { Icon } from '../components/Icon'
 import type { Scenario } from '../components/Shell'
 import { Badge, Button, Card, CardHeader } from '../components/ui'
@@ -357,6 +358,8 @@ function LiveApplication({ number }: { number: number }) {
               subtitle="Названия файлов из формы. Содержимое на сервер не отправлялось"
             />
           )}
+
+          <GoodsCard key={detail.number} number={detail.number} subtitle="Ссылки на товары магазинов в пределах суммы кредита" />
 
           <StatementCard
             statement={detail.statement}

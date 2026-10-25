@@ -1,5 +1,7 @@
+using System.Net;
 using System.Text;
 using System.Text.Json;
+using System.Text.Json.Nodes;
 using Npgsql;
 using NpgsqlTypes;
 
@@ -150,6 +152,126 @@ static class PurposeHandoff
 
     public static Task<List<object>> MatchPurposeAsync(NpgsqlDataSource dataSource, string purpose) =>
         MatchAsync(dataSource, purpose);
+
+    public static async Task<IResult> ReadGoodsAsync(
+        IHttpClientFactory httpClientFactory,
+        IConfiguration configuration,
+        long applicationId)
+    {
+        var root = configuration["Ml:BaseUrl"]?.Trim().TrimEnd('/');
+        if (string.IsNullOrEmpty(root))
+            return Results.Ok(EmptyGoods("unavailable"));
+
+        try
+        {
+            var client = httpClientFactory.CreateClient(HttpClientName);
+            using var response = await client.GetAsync($"{root}/applications/{applicationId}/goods");
+            if (response.StatusCode == HttpStatusCode.NotFound)
+                return Results.Ok(EmptyGoods("absent"));
+            if (!response.IsSuccessStatusCode)
+                return Results.Ok(EmptyGoods("unavailable"));
+
+            await using var stream = await response.Content.ReadAsStreamAsync();
+            var node = await JsonNode.ParseAsync(stream);
+            return Results.Ok(ProjectGoods(node));
+        }
+        catch (Exception ex) when (ex is HttpRequestException or TaskCanceledException or InvalidOperationException or UriFormatException or JsonException)
+        {
+            return Results.Ok(EmptyGoods("unavailable"));
+        }
+    }
+
+    static object EmptyGoods(string status) => new { status, categories = Array.Empty<object>() };
+
+    static object ProjectGoods(JsonNode? node)
+    {
+        var status = Text(node?["status"]);
+        if (status is not ("queued" or "running" or "done" or "failed" or "no_categories"))
+            return EmptyGoods("unavailable");
+
+        var categories = new List<object>();
+        if (node?["results"] is JsonArray results)
+        {
+            foreach (var entry in results)
+            {
+                var code = Clip(Text(entry?["code"]), 40);
+                var title = Clip(Text(entry?["title"]), 200);
+                var search = entry?["search"];
+                var offers = ReadOffers(search?["offers"] as JsonArray);
+                var overBudget = ReadOffers(search?["overBudget"] as JsonArray);
+                if (code.Length == 0 && title.Length == 0 && offers.Count == 0 && overBudget.Count == 0)
+                    continue;
+                categories.Add(new { code, title, offers, overBudget });
+            }
+        }
+
+        return new { status, categories };
+    }
+
+    static List<object> ReadOffers(JsonArray? rows)
+    {
+        var offers = new List<object>();
+        if (rows is null)
+            return offers;
+        foreach (var row in rows)
+        {
+            if (offers.Count == 30)
+                break;
+            var name = Clip(Text(row?["name"]), 300);
+            var url = HttpUrl(Text(row?["url"]));
+            var price = Money(row?["priceRub"]);
+            if (name.Length == 0 || url is null || price is null)
+                continue;
+            offers.Add(new { name, url, priceRub = price });
+        }
+        return offers;
+    }
+
+    static string Clip(string? value, int limit)
+    {
+        var text = value?.Trim() ?? "";
+        return text.Length <= limit ? text : text[..limit];
+    }
+
+    static string? Text(JsonNode? node)
+    {
+        if (node is not JsonValue value)
+            return null;
+        return value.TryGetValue<string>(out var text) ? text : null;
+    }
+
+    static decimal? Money(JsonNode? node)
+    {
+        if (node is null)
+            return null;
+        try
+        {
+            using var document = JsonDocument.Parse(node.ToJsonString());
+            var element = document.RootElement;
+            if (element.ValueKind != JsonValueKind.Number || !element.TryGetDecimal(out var money))
+                return null;
+            if (money < 0 || money >= 1_000_000_000_000m)
+                return null;
+            return decimal.Round(money, 2, MidpointRounding.AwayFromZero);
+        }
+        catch (JsonException)
+        {
+            return null;
+        }
+    }
+
+    static string? HttpUrl(string? text)
+    {
+        if (string.IsNullOrWhiteSpace(text))
+            return null;
+        if (!Uri.TryCreate(text.Trim(), UriKind.Absolute, out var uri))
+            return null;
+        if (uri.Scheme != Uri.UriSchemeHttp && uri.Scheme != Uri.UriSchemeHttps)
+            return null;
+        if (string.IsNullOrEmpty(uri.Host))
+            return null;
+        return uri.AbsoluteUri;
+    }
 
     static string Normalize(string value) =>
         value.ToLowerInvariant().Replace('ё', 'е');
