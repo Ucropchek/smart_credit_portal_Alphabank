@@ -27,6 +27,7 @@ class SearchSettings:
     fetch_concurrency: int = 5
     fetch_max_bytes: int = 1_500_000
     judge_batch: int = 4
+    card_batch: int = 20
     per_domain_limit: int = 3
     per_catalog_limit: int = 10
     max_listed: int = 40

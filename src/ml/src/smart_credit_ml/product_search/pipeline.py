@@ -22,11 +22,19 @@ from smart_credit_ml.product_search.models import (
 from smart_credit_ml.product_search.web import PageFetcher, WebSearch
 
 _TRACKING = ("utm_", "yclid", "gclid", "fbclid", "_openstat")
+_LOWER_BOUND = re.compile(r"\bот\s*\d|\d\s*[-–—]\s*\d", re.IGNORECASE)
 
 PLAN_SYSTEM = (
     "Ты помогаешь предпринимателю найти товар, который он купит на кредит. "
     "Составь короткие поисковые запросы на русском языке, которые приведут на страницы интернет-магазинов "
-    "с конкретным товаром и ценой. Добавляй слова «купить» или «цена». Не пиши ссылки и названия сайтов."
+    "с этим товаром и ценой. Правила:\n"
+    "1. Тип товара строго как в ключевых словах. Не заменяй его другим товаром и не расширяй до категории: "
+    "для «компьютер» нельзя писать «ноутбук», «моноблок» или «компьютерная техника».\n"
+    "2. Не добавляй уточнений, которых нет в ключевых словах и цели: «игровой», «для работы», бренды, модели.\n"
+    "3. Цену указывай только как верхнюю границу: «до N рублей», где N — бюджет. "
+    "Никогда не пиши нижнюю границу («от N»), диапазоны и другие суммы.\n"
+    "4. Добавляй слова «купить» или «цена». Не пиши ссылки и названия сайтов.\n"
+    "5. Запросы должны отличаться формулировкой, а не товаром."
 )
 
 JUDGE_SYSTEM = (
@@ -39,6 +47,33 @@ JUDGE_SYSTEM = (
     "reason — одна короткая фраза по-русски.\n"
     "Ничего не придумывай. Отвечай только по переданным данным, используя index страницы."
 )
+
+CARD_SYSTEM = (
+    "Ты проверяешь товары из каталогов интернет-магазинов. Название и цена уже известны. "
+    "Для каждого товара по названию реши:\n"
+    "relevant — это тот же тип товара, что в ключевых словах, а не аксессуар, комплектующая или другой тип товара;\n"
+    "relevance — от 1 до 5: 5 — точно тот товар, 3 — подходит частично, 1 — почти не подходит.\n"
+    "Отвечай только по переданным данным, используя index товара."
+)
+
+CARD_SCHEMA: dict[str, Any] = {
+    "type": "object",
+    "properties": {
+        "items": {
+            "type": "array",
+            "items": {
+                "type": "object",
+                "properties": {
+                    "index": {"type": "integer"},
+                    "relevant": {"type": "boolean"},
+                    "relevance": {"type": "integer"},
+                },
+                "required": ["index", "relevant", "relevance"],
+            },
+        }
+    },
+    "required": ["items"],
+}
 
 PLAN_SCHEMA: dict[str, Any] = {
     "type": "object",
@@ -141,7 +176,7 @@ class ProductSearcher:
                 continue
             price, source = picked
             offer = Offer(
-                name=verdict.name or (candidate.facts and candidate.facts.product_name) or candidate.hit.title,
+                name=(candidate.facts and candidate.facts.product_name) or verdict.name or candidate.hit.title,
                 url=candidate.hit.url,
                 domain=domain_of(candidate.hit.url),
                 price_rub=price,
@@ -188,10 +223,21 @@ class ProductSearcher:
         except LlmError as error:
             warnings.append(f"Модель не составила запросы, взят запрос по ключевым словам ({error}).")
             return fallback
+        stems = _stems(keywords)
         queries: list[str] = []
+        rejected: list[str] = []
         for query in answer.get("queries", []):
-            if isinstance(query, str) and query.strip() and query.strip() not in queries and "://" not in query:
-                queries.append(query.strip()[:200])
+            if not isinstance(query, str) or not query.strip() or "://" in query:
+                continue
+            query = query.strip()[:200]
+            if query in queries:
+                continue
+            if _LOWER_BOUND.search(query) or not all(stem in query.lower().replace("ё", "е") for stem in stems):
+                rejected.append(query)
+                continue
+            queries.append(query)
+        if rejected:
+            warnings.append(f"Отброшены запросы модели, уходящие от товара или с нижней границей цены: {rejected}")
         return queries[: self.settings.max_queries] or fallback
 
     async def _collect(self, queries: list[str], warnings: list[str]) -> list[_Candidate]:
@@ -268,15 +314,51 @@ class ProductSearcher:
     async def _judge_all(
         self, keywords: str, candidates: list[_Candidate], warnings: list[str]
     ) -> dict[int, _Verdict]:
+        cards = [index for index, candidate in enumerate(candidates) if _is_priced_card(candidate)]
+        card_set = set(cards)
+        pages = [index for index in range(len(candidates)) if index not in card_set]
+
         verdicts: dict[int, _Verdict] = {}
         size = max(1, self.settings.judge_batch)
-        for start in range(0, len(candidates), size):
-            batch = list(range(start, min(start + size, len(candidates))))
+        for start in range(0, len(pages), size):
+            batch = pages[start : start + size]
             try:
                 verdicts.update(await self._judge(keywords, candidates, batch))
             except LlmError as error:
                 warnings.append(f"Модель не разобрала страницы {batch[0]}–{batch[-1]}, взята только разметка ({error}).")
                 verdicts.update(_markup_verdicts(candidates, batch))
+
+        size = max(1, self.settings.card_batch)
+        for start in range(0, len(cards), size):
+            batch = cards[start : start + size]
+            try:
+                verdicts.update(await self._check_cards(keywords, candidates, batch))
+            except LlmError as error:
+                warnings.append(f"Модель не проверила карточки каталогов, взяты все по разметке ({error}).")
+                verdicts.update(_markup_verdicts(candidates, batch))
+        return verdicts
+
+    async def _check_cards(self, keywords: str, candidates: list[_Candidate], batch: list[int]) -> dict[int, _Verdict]:
+        cards = [{"index": index, "name": candidates[index].facts.product_name} for index in batch]
+        prompt = f"Ключевые слова: {keywords}\nТовары:\n{json.dumps(cards, ensure_ascii=False)}"
+        answer = await self.llm.ask_json(CARD_SYSTEM, prompt, CARD_SCHEMA)
+
+        allowed = set(batch)
+        verdicts: dict[int, _Verdict] = {}
+        for item in answer.get("items", []):
+            if not isinstance(item, dict) or item.get("index") not in allowed:
+                continue
+            index = item["index"]
+            facts = candidates[index].facts
+            relevance = item.get("relevance")
+            verdicts[index] = _Verdict(
+                is_offer=True,
+                relevant=item.get("relevant") is True,
+                name=facts.product_name or "",
+                price=None,
+                relevance=min(5, max(1, relevance)) if isinstance(relevance, int) else 1,
+                reason=f"Карточка из каталога {domain_of(candidates[index].catalog_url)}: название и цена из разметки.",
+            )
         return verdicts
 
     async def _judge(self, keywords: str, candidates: list[_Candidate], batch: list[int]) -> dict[int, _Verdict]:
@@ -334,6 +416,20 @@ def _markup_verdicts(candidates: list[_Candidate], batch: list[int]) -> dict[int
                 reason="Модель недоступна: товар и цена взяты из разметки страницы.",
             )
     return verdicts
+
+
+def _stems(keywords: str) -> list[str]:
+    words = re.findall(r"\w+", keywords.lower().replace("ё", "е"))
+    return [word[: max(4, len(word) - 3)] if len(word) > 4 else word for word in words if len(word) >= 3] or [
+        keywords.lower()
+    ]
+
+
+def _is_priced_card(candidate: _Candidate) -> bool:
+    facts = candidate.facts
+    return bool(
+        candidate.catalog_url and facts and facts.product_name and facts.price is not None and is_rub(facts.currency)
+    )
 
 
 def _same_site(host: str, site: str) -> bool:
