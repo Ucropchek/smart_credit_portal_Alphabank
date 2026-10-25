@@ -34,6 +34,8 @@ function AppFrame({
   applicationNumber,
   bankQueue,
   clientCount,
+  focusNumber,
+  focusTick,
   onBankQueue,
   onClientCount,
   onApply,
@@ -44,6 +46,7 @@ function AppFrame({
   go,
   overview,
   onOverview,
+  onOpenNotice,
   fill,
 }: {
   role: Role
@@ -53,6 +56,8 @@ function AppFrame({
   applicationNumber: number | null
   bankQueue: number | null
   clientCount: number | null
+  focusNumber: number | null
+  focusTick: number
   onBankQueue: (count: number) => void
   onClientCount: (count: number) => void
   onApply: (draft: LoanDraft) => void
@@ -63,6 +68,7 @@ function AppFrame({
   go: (s: Screen) => void
   overview?: boolean
   onOverview?: () => void
+  onOpenNotice: (number: number) => void
   fill?: boolean
 }) {
   const mainRef = useRef<HTMLElement>(null)
@@ -83,6 +89,7 @@ function AppFrame({
           title={titles[screen]}
           overview={overview}
           onOverview={onOverview}
+          onOpenNotice={onOpenNotice}
         />
         <main ref={mainRef} className={fill ? 'flex-1 overflow-y-auto' : 'flex-1'}>
           {screen === 'dashboard' && (
@@ -102,7 +109,7 @@ function AppFrame({
           )}
           {screen === 'underwriter' && (
             <div className="mx-auto max-w-[1280px] px-8 py-8">
-              <Underwriter onCount={onBankQueue} />
+              <Underwriter key={`${focusNumber ?? 'queue'}:${focusTick}`} onCount={onBankQueue} focusNumber={focusNumber} />
             </div>
           )}
         </main>
@@ -158,6 +165,8 @@ function Overview({
                     applicationNumber={null}
                     bankQueue={null}
                     clientCount={null}
+                    focusNumber={null}
+                    focusTick={0}
                     onBankQueue={noop}
                     onClientCount={noop}
                     onApply={noop}
@@ -166,6 +175,7 @@ function Overview({
                     onRole={noop}
                     onScenario={noop}
                     go={noop}
+                    onOpenNotice={noop}
                   />
                 </div>
               </div>
@@ -186,6 +196,8 @@ export default function App() {
   const [applicationNumber, setApplicationNumber] = useState<number | null>(null)
   const [bankQueue, setBankQueue] = useState<number | null>(null)
   const [clientCount, setClientCount] = useState<number | null>(null)
+  const [focusNumber, setFocusNumber] = useState<number | null>(null)
+  const [focusTick, setFocusTick] = useState(0)
 
   useEffect(() => {
     if (applicationNumber == null) return
@@ -229,6 +241,8 @@ export default function App() {
       applicationNumber={applicationNumber}
       bankQueue={bankQueue}
       clientCount={clientCount}
+      focusNumber={focusNumber}
+      focusTick={focusTick}
       onBankQueue={setBankQueue}
       onClientCount={setClientCount}
       onApply={(next) => {
@@ -252,6 +266,16 @@ export default function App() {
       go={setScreen}
       overview={overview}
       onOverview={() => setOverview(true)}
+      onOpenNotice={(number) => {
+        if (role === 'bank') {
+          setFocusNumber(number)
+          setFocusTick((tick) => tick + 1)
+          setScreen('underwriter')
+        } else {
+          setApplicationNumber(number)
+          setScreen('tracker')
+        }
+      }}
     />
   )
 }

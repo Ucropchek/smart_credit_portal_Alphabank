@@ -21,6 +21,7 @@ export type ApplicationListItem = {
   step: string
   stepTitle: string
   employeeDecision?: string | null
+  openRequestCount?: number
 }
 
 export type ScorePoint = {

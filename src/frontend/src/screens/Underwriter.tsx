@@ -221,9 +221,15 @@ function StatementFacts({ statement }: { statement: AccountStatement | undefined
   )
 }
 
-export function Underwriter({ onCount }: { onCount?: (count: number) => void }) {
+export function Underwriter({
+  onCount,
+  focusNumber,
+}: {
+  onCount?: (count: number) => void
+  focusNumber?: number | null
+}) {
   const [rows, setRows] = useState<ApplicationListItem[] | null>(null)
-  const [selected, setSelected] = useState<number | null>(null)
+  const [selected, setSelected] = useState<number | null>(focusNumber ?? null)
   const [loaded, setLoaded] = useState<ApplicationDetail | null>(null)
   const [errorFor, setErrorFor] = useState<number | null>(null)
   const [scoring, setScoring] = useState(false)

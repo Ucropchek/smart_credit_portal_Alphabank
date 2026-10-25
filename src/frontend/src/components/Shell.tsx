@@ -1,4 +1,5 @@
 import { useEffect, useRef, useState, type ReactNode } from 'react'
+import { listApplications, listStatus, type ApplicationListItem } from '../api/applications'
 import { cx } from './cx'
 import { Icon, type IconName } from './Icon'
 
@@ -216,6 +217,40 @@ function ScenarioSelect({
   )
 }
 
+function notices(role: Role, rows: ApplicationListItem[]) {
+  const items: { key: string; number: number; title: string; text: string }[] = []
+  for (const row of rows) {
+    const openCount = row.openRequestCount ?? 0
+    if (role === 'client') {
+      if (openCount > 0) {
+        items.push({
+          key: `${row.number}-question`,
+          number: row.number,
+          title: `Заявка #${row.number}`,
+          text: openCount === 1 ? 'Банк ждёт ответ на вопрос' : `Банк ждёт ответы: ${openCount}`,
+        })
+      }
+      if (row.employeeDecision) {
+        const status = listStatus(row.employeeDecision, row.stepTitle)
+        items.push({
+          key: `${row.number}-decision`,
+          number: row.number,
+          title: `Заявка #${row.number}`,
+          text: `Решение банка: ${status.label}`,
+        })
+      }
+    } else if (!row.employeeDecision) {
+      items.push({
+        key: `${row.number}-open`,
+        number: row.number,
+        title: `Заявка #${row.number}`,
+        text: `${row.businessName ?? 'Компания'} · ${row.stepTitle}`,
+      })
+    }
+  }
+  return items
+}
+
 export function Header({
   role,
   onRole,
@@ -224,6 +259,7 @@ export function Header({
   title,
   overview,
   onOverview,
+  onOpenNotice,
 }: {
   role: Role
   onRole: (r: Role) => void
@@ -232,7 +268,25 @@ export function Header({
   title: ReactNode
   overview?: boolean
   onOverview?: () => void
+  onOpenNotice?: (number: number) => void
 }) {
+  const [rows, setRows] = useState<ApplicationListItem[] | null>(null)
+  const [open, setOpen] = useState(false)
+  const items = rows ? notices(role, rows) : []
+
+  useEffect(() => {
+    let cancel = false
+    listApplications()
+      .then((list) => {
+        if (!cancel) setRows(list)
+      })
+      .catch(() => {
+        if (!cancel) setRows([])
+      })
+    return () => {
+      cancel = true
+    }
+  }, [role, open])
   return (
     <header className="flex h-[72px] shrink-0 items-center gap-6 border-b border-line bg-white px-8">
       <div className="min-w-0 flex-1 truncate text-[15px] font-semibold text-ink">{title}</div>
@@ -279,14 +333,50 @@ export function Header({
             Все экраны
           </button>
         )}
-        <button
-          type="button"
-          aria-label="Уведомления"
-          className="relative grid size-10 cursor-pointer place-items-center rounded-xl border border-line bg-white text-ink hover:bg-canvas"
-        >
-          <Icon name="bell" size={18} />
-          <span className="absolute top-2 right-2.5 size-2 rounded-full bg-alfa ring-2 ring-white" />
-        </button>
+        <div className="relative">
+          {open && (
+            <button
+              type="button"
+              aria-label="Закрыть уведомления"
+              className="fixed inset-0 z-10 cursor-default"
+              onClick={() => setOpen(false)}
+            />
+          )}
+          <button
+            type="button"
+            aria-label="Уведомления"
+            aria-expanded={open}
+            onClick={() => setOpen((current) => !current)}
+            className="relative z-20 grid size-10 cursor-pointer place-items-center rounded-xl border border-line bg-white text-ink hover:bg-canvas"
+          >
+            <Icon name="bell" size={18} />
+            {items.length > 0 && (
+              <span className="tnum absolute -top-1 -right-1 grid h-5 min-w-5 place-items-center rounded-full bg-alfa px-1 text-[11px] font-semibold text-white">
+                {items.length}
+              </span>
+            )}
+          </button>
+          {open && (
+            <div className="absolute top-12 right-0 z-20 w-80 rounded-2xl border border-line bg-white p-2 shadow-[0_12px_32px_-16px_rgb(11_31_53/0.35)]">
+              {rows == null && <p className="px-3 py-4 text-sm text-muted">Загружаем…</p>}
+              {rows && items.length === 0 && <p className="px-3 py-4 text-sm text-muted">Сейчас ничего не требует внимания</p>}
+              {items.map((item) => (
+                <button
+                  key={item.key}
+                  type="button"
+                  onClick={() => {
+                    setOpen(false)
+                    onOpenNotice?.(item.number)
+                  }}
+                  className="block w-full cursor-pointer rounded-xl px-3 py-3 text-left hover:bg-canvas"
+                >
+                  <div className="text-sm font-semibold text-ink">{item.title}</div>
+                  <div className="mt-0.5 text-sm text-muted">{item.text}</div>
+                </button>
+              ))}
+            </div>
+          )}
+        </div>
       </div>
     </header>
   )
