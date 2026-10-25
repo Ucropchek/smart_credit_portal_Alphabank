@@ -14,6 +14,7 @@ static class ApplicationRoutes
         app.MapPost("/applications/purpose-categories", MatchPurposeAsync);
         app.MapGet("/applications/{number:long}", DetailAsync);
         app.MapGet("/applications/{number:long}/goods", GoodsAsync);
+        app.MapPost("/applications/{number:long}/goods", StartGoodsAsync);
         app.MapGet("/applications/{number:long}/requests", ListRequestsAsync);
         app.MapPost("/applications/{number:long}/requests", CreateRequestAsync);
         app.MapPost("/applications/{number:long}/requests/{requestId:long}/answer", AnswerRequestAsync);
@@ -54,6 +55,21 @@ static class ApplicationRoutes
         command.Parameters.AddWithValue("id", number);
         if (await command.ExecuteScalarAsync() is null)
             return Results.NotFound(new { error = "application not found" });
+        return await PurposeHandoff.ReadGoodsAsync(httpClientFactory, configuration, number);
+    }
+
+    static async Task<IResult> StartGoodsAsync(
+        long number,
+        NpgsqlDataSource dataSource,
+        PortalSchema portal,
+        IHttpClientFactory httpClientFactory,
+        IConfiguration configuration)
+    {
+        await portal.EnsureAsync();
+        var form = await LoadFormAsync(dataSource, number);
+        if (form is null)
+            return Results.NotFound(new { error = "application not found" });
+        await PurposeHandoff.SendAsync(dataSource, httpClientFactory, configuration, number, form.Purpose, form.Amount);
         return await PurposeHandoff.ReadGoodsAsync(httpClientFactory, configuration, number);
     }
 

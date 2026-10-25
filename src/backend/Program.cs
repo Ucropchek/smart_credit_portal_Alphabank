@@ -1113,8 +1113,14 @@ app.Map("/bki-consent", async (HttpContext context, BkiConsentStore store, Npgsq
 });
 
 // Client application. The body has no BKI checkbox; it comes over /bki-consent.
-// This request only stores the form: no registry reads and no points. Tracking starts at "submitted".
-app.MapPost("/applications", async (ApplicationRequest? request, NpgsqlDataSource dataSource, PortalSchema portal, BkiConsentStore consent) =>
+// This request stores the form and asks ML to search goods. No registry reads and no points.
+app.MapPost("/applications", async (
+    ApplicationRequest? request,
+    NpgsqlDataSource dataSource,
+    PortalSchema portal,
+    BkiConsentStore consent,
+    IHttpClientFactory httpClientFactory,
+    IConfiguration configuration) =>
 {
     if (request is null)
         return Results.BadRequest(new { error = "body must be a JSON object with purpose, amount, termMonths, inn and registrationId" });
@@ -1183,6 +1189,7 @@ app.MapPost("/applications", async (ApplicationRequest? request, NpgsqlDataSourc
     var submittedAt = reader.GetFieldValue<DateTimeOffset>(2);
     await reader.CloseAsync();
     await ApplicationConsent.BindLatestAsync(dataSource, portal, consent, number);
+    await PurposeHandoff.SendAsync(dataSource, httpClientFactory, configuration, number, purpose!, request.Amount!.Value);
     return Results.Created($"/applications/{number}", new
     {
         number,

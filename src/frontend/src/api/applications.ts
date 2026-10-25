@@ -286,10 +286,8 @@ function isGoodsSearch(value: unknown): value is GoodsSearch {
   })
 }
 
-export async function getGoods(number: number): Promise<GoodsSearch> {
-  const response = await fetch(`/applications/${number}/goods`, { signal: AbortSignal.timeout(8000) })
-  const body: unknown = await response.json().catch(() => null)
-  if (!response.ok || !isGoodsSearch(body)) throw new Error('goods request failed')
+function asGoodsSearch(body: unknown): GoodsSearch {
+  if (!isGoodsSearch(body)) throw new Error('goods request failed')
   return {
     status: body.status,
     categories: body.categories.map((category) => ({
@@ -299,6 +297,23 @@ export async function getGoods(number: number): Promise<GoodsSearch> {
       overBudget: readOffers(category.overBudget),
     })),
   }
+}
+
+export async function startGoodsSearch(number: number): Promise<GoodsSearch> {
+  const response = await fetch(`/applications/${number}/goods`, {
+    method: 'POST',
+    signal: AbortSignal.timeout(8000),
+  })
+  const body: unknown = await response.json().catch(() => null)
+  if (!response.ok) throw new Error('goods request failed')
+  return asGoodsSearch(body)
+}
+
+export async function getGoods(number: number): Promise<GoodsSearch> {
+  const response = await fetch(`/applications/${number}/goods`, { signal: AbortSignal.timeout(8000) })
+  const body: unknown = await response.json().catch(() => null)
+  if (!response.ok) throw new Error('goods request failed')
+  return asGoodsSearch(body)
 }
 
 export async function getApplication(number: number, view: 'client' | 'bank' = 'client'): Promise<ApplicationDetail> {

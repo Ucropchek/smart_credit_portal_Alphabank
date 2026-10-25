@@ -1,11 +1,11 @@
 import { useEffect, useState } from 'react'
-import { getGoods, type GoodsOffer, type GoodsSearch } from '../api/applications'
+import { getGoods, startGoodsSearch, type GoodsOffer, type GoodsSearch } from '../api/applications'
 import { rub } from '../format'
-import { Badge, Card, CardHeader } from './ui'
+import { Badge, Button, Card, CardHeader } from './ui'
 
 function statusText(search: GoodsSearch) {
   if (search.status === 'queued' || search.status === 'running') return 'Ищем предложения магазинов под сумму кредита.'
-  if (search.status === 'absent') return 'Поиск начнётся при проверке реестров или скоринге.'
+  if (search.status === 'absent') return 'Поиск ещё не запускался.'
   if (search.status === 'unavailable') return 'Сервис поиска сейчас не отвечает.'
   if (search.status === 'no_categories') return 'По цели не нашлось категорий товаров.'
   if (search.status === 'failed') return 'Поиск не удался.'
@@ -40,6 +40,8 @@ function OfferList({ offers }: { offers: GoodsOffer[] }) {
 
 export function GoodsCard({ number, subtitle }: { number: number; subtitle: string }) {
   const [search, setSearch] = useState<GoodsSearch | null>(null)
+  const [kick, setKick] = useState(0)
+  const [starting, setStarting] = useState(false)
 
   useEffect(() => {
     let cancel = false
@@ -60,7 +62,15 @@ export function GoodsCard({ number, subtitle }: { number: number; subtitle: stri
       cancel = true
       window.clearTimeout(timer)
     }
-  }, [number])
+  }, [number, kick])
+
+  const start = () => {
+    setStarting(true)
+    startGoodsSearch(number)
+      .then(() => setKick((value) => value + 1))
+      .catch(() => setSearch({ status: 'unavailable', categories: [] }))
+      .finally(() => setStarting(false))
+  }
 
   const offers = search?.categories.reduce((sum, category) => sum + category.offers.length, 0) ?? 0
   const overBudget = search?.categories.reduce((sum, category) => sum + category.overBudget.length, 0) ?? 0
@@ -81,6 +91,11 @@ export function GoodsCard({ number, subtitle }: { number: number; subtitle: stri
           ) : undefined
         }
       />
+      {search && (search.status === 'absent' || search.status === 'failed' || search.status === 'unavailable') && (
+        <Button type="button" className="mt-6" onClick={start} disabled={starting}>
+          {starting ? 'Запускаем…' : 'Найти товары'}
+        </Button>
+      )}
       {listed && (
         <div className="mt-6 space-y-6">
           {search?.categories.map((category, index) =>
