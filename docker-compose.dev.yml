@@ -1,0 +1,15 @@
+# Development override: publishes the internal services on the host for dotnet run, npm run dev and local ML.
+# docker compose -f docker-compose.yml -f docker-compose.dev.yml up -d postgres
+
+services:
+  postgres:
+    ports:
+      - "${POSTGRES_PORT:-5432}:5432"
+
+  searxng:
+    ports:
+      - "${SEARXNG_PORT:-8888}:8080"
+
+  ollama:
+    ports:
+      - "${OLLAMA_PORT:-11434}:11434"
