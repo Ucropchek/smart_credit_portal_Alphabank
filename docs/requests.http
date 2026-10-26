@@ -1,0 +1,101 @@
+@api = http://localhost:8080
+@inn = 7701990013
+@ogrn = 1247700099008
+
+### API жив
+GET {{api}}/health
+
+### Карточка демо-компании по ИНН
+GET {{api}}/companies/{{inn}}
+
+### Карточка по ОГРН, с выручкой ФНС
+GET {{api}}/businesses/{{ogrn}}
+
+### Балл карточки без выписки заявки
+GET {{api}}/businesses/{{ogrn}}/score
+
+### Категории товаров по цели
+POST {{api}}/applications/purpose-categories
+Content-Type: application/json
+
+{
+  "purpose": "Покупка оборудования для компьютерной школы"
+}
+
+### Подать заявку
+# Ответ содержит number. Подставьте его вместо 0 в запросах ниже.
+POST {{api}}/applications
+Content-Type: application/json
+
+{
+  "purpose": "Покупка оборудования для компьютерной школы",
+  "amount": 12000000,
+  "termMonths": 27,
+  "inn": "7701990013",
+  "registrationId": "1247700099008",
+  "annualRevenue": 28500000,
+  "obligations": 0,
+  "employees": 9,
+  "documents": [
+    { "kind": "Бухгалтерский баланс (ф. 1)", "name": "Баланс_2025.pdf" }
+  ]
+}
+
+### Список заявок
+GET {{api}}/applications
+
+### Заявка глазами клиента
+GET {{api}}/applications/0?view=client
+
+### Снимок реестров
+POST {{api}}/applications/0/registry-check
+
+### Скоринг и потолок продукта
+POST {{api}}/applications/0/score
+
+### Выписка за 6 месяцев
+POST {{api}}/applications/0/statement-consent
+Content-Type: application/json
+
+{
+  "consent": true,
+  "turnover": [
+    { "month": "2026-04", "incoming": 16000000, "outgoing": 12000000 },
+    { "month": "2026-05", "incoming": 15500000, "outgoing": 11800000 },
+    { "month": "2026-06", "incoming": 16500000, "outgoing": 12400000 },
+    { "month": "2026-07", "incoming": 17000000, "outgoing": 13000000 },
+    { "month": "2026-08", "incoming": 15000000, "outgoing": 11200000 },
+    { "month": "2026-09", "incoming": 16000000, "outgoing": 12100000 }
+  ]
+}
+
+### Вопрос клиенту
+POST {{api}}/applications/0/requests
+Content-Type: application/json
+
+{
+  "text": "Пришлите пояснение по назначению оборудования"
+}
+
+### Ответ клиента
+POST {{api}}/applications/0/requests/0/answer
+Content-Type: application/json
+
+{
+  "text": "Оборудование для компьютерного класса"
+}
+
+### Решение сотрудника
+POST {{api}}/applications/0/decision
+Content-Type: application/json
+
+{
+  "decision": "approve",
+  "reason": "Сумма в пределах лимита"
+}
+
+### Подбор товаров
+GET {{api}}/applications/0/goods
+
+### ML-сервис
+GET http://localhost:8000/health

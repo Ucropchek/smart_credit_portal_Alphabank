@@ -1,0 +1,359 @@
+openapi: 3.0.3
+info:
+  title: Умный кредитный кабинет
+  version: 1.0.0
+  description: |
+    API кредитного конвейера. Кабинет ходит сюда через nginx на порту 3000
+    по путям /applications, /companies, /businesses и WebSocket /bki-consent.
+    Напрямую API слушает http://localhost:8080.
+    Подбор товаров — отдельный сервис, его Swagger: http://localhost:8000/docs,
+    спецификация: http://localhost:8000/openapi.json.
+    Поля ответа — camelCase.
+servers:
+  - url: http://localhost:8080
+    description: API в docker compose
+  - url: http://localhost:3000
+    description: Те же пути заявок и компаний через nginx кабинета. /health там нет
+
+tags:
+  - name: health
+  - name: companies
+  - name: applications
+  - name: ml
+    description: Сервис подбора товаров, порт 8000, не этот сервер
+
+paths:
+  /health:
+    get:
+      tags: [health]
+      summary: Проверка API
+      responses:
+        "200":
+          description: Сервис отвечает
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  status: { type: string, example: ok }
+
+  /companies/{inn}:
+    get:
+      tags: [companies]
+      summary: Карточка по ИНН из локальных моков ЕГРЮЛ или ЕГРИП
+      parameters:
+        - $ref: "#/components/parameters/inn"
+      responses:
+        "200":
+          description: Найденная организация или предприниматель
+        "404":
+          $ref: "#/components/responses/error"
+
+  /businesses/{registrationId}:
+    get:
+      tags: [companies]
+      summary: Карточка по ОГРН или ОГРНИП, включая выручку и численность ФНС
+      parameters:
+        - $ref: "#/components/parameters/registrationId"
+      responses:
+        "200":
+          description: Карточка бизнеса
+        "404":
+          $ref: "#/components/responses/error"
+
+  /businesses/{registrationId}/score:
+    get:
+      tags: [companies]
+      summary: Балл карточки компании без выписки заявки
+      description: Строка выписки здесь всегда 0. Балл заявки считается отдельно и учитывает обороты.
+      parameters:
+        - $ref: "#/components/parameters/registrationId"
+      responses:
+        "200":
+          description: Баллы и решение модели
+
+  /applications:
+    get:
+      tags: [applications]
+      summary: Список заявок
+      responses:
+        "200":
+          description: Заявки по возрастанию номера
+          content:
+            application/json:
+              schema:
+                type: array
+                items:
+                  $ref: "#/components/schemas/ApplicationListItem"
+    post:
+      tags: [applications]
+      summary: Подать заявку и запустить поиск товаров
+      description: |
+        Согласие на БКИ в это тело не входит. Его кабинет передаёт по WebSocket /bki-consent
+        до отправки формы, API связывает соединение с новой заявкой.
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/ApplicationCreate"
+      responses:
+        "201":
+          description: Заявка создана, шаг submitted
+        "400":
+          $ref: "#/components/responses/error"
+
+  /applications/purpose-categories:
+    post:
+      tags: [applications]
+      summary: Разобрать цель кредита в категории товаров
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [purpose]
+              properties:
+                purpose: { type: string }
+      responses:
+        "200":
+          description: Совпавшие категории
+
+  /applications/{number}:
+    get:
+      tags: [applications]
+      summary: Карточка заявки
+      parameters:
+        - $ref: "#/components/parameters/number"
+        - name: view
+          in: query
+          schema: { type: string, enum: [client, bank] }
+          description: client скрывает стоп-факторы, если сотрудник отказал без комментария
+      responses:
+        "200":
+          description: Заявка, скоринг, продукт, вопросы, выписка, документы
+        "404":
+          $ref: "#/components/responses/error"
+
+  /applications/{number}/registry-check:
+    post:
+      tags: [applications]
+      summary: Снять реестры в заявку и перевести шаг в registryCheck
+      parameters:
+        - $ref: "#/components/parameters/number"
+      responses:
+        "200":
+          description: Заявка со снимками
+        "404":
+          $ref: "#/components/responses/error"
+
+  /applications/{number}/score:
+    post:
+      tags: [applications]
+      summary: Посчитать балл, продукт и сумму к выдаче
+      description: После решения сотрудника метод отвечает 409 и балл не переписывает.
+      parameters:
+        - $ref: "#/components/parameters/number"
+      responses:
+        "200":
+          description: Заявка на шаге scoring
+        "409":
+          $ref: "#/components/responses/error"
+
+  /applications/{number}/decision:
+    post:
+      tags: [applications]
+      summary: Записать решение сотрудника и перевести шаг в decision
+      parameters:
+        - $ref: "#/components/parameters/number"
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [decision]
+              properties:
+                decision: { type: string, enum: [approve, review, reject] }
+                reason: { type: string, description: Комментарий клиенту }
+      responses:
+        "200":
+          description: Решение записано
+        "409":
+          description: Одобрение или разбор без сохранённого скоринга
+
+  /applications/{number}/requests:
+    get:
+      tags: [applications]
+      summary: Вопросы банка по заявке
+      parameters:
+        - $ref: "#/components/parameters/number"
+      responses:
+        "200":
+          description: Список вопросов
+    post:
+      tags: [applications]
+      summary: Задать вопрос клиенту
+      parameters:
+        - $ref: "#/components/parameters/number"
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [text]
+              properties:
+                text: { type: string, maxLength: 2000 }
+      responses:
+        "201":
+          description: Вопрос открыт
+
+  /applications/{number}/requests/{requestId}/answer:
+    post:
+      tags: [applications]
+      summary: Ответ клиента на вопрос
+      parameters:
+        - $ref: "#/components/parameters/number"
+        - name: requestId
+          in: path
+          required: true
+          schema: { type: integer, format: int64 }
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [text]
+              properties:
+                text: { type: string, maxLength: 2000 }
+      responses:
+        "200":
+          description: Ответ сохранён
+        "409":
+          description: На вопрос уже ответили
+
+  /applications/{number}/statement-consent:
+    post:
+      tags: [applications]
+      summary: Сохранить согласие и обороты выписки
+      parameters:
+        - $ref: "#/components/parameters/number"
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/Statement"
+      responses:
+        "200":
+          description: Выписка записана
+        "400":
+          $ref: "#/components/responses/error"
+
+  /applications/{number}/goods:
+    get:
+      tags: [applications]
+      summary: Статус подбора товаров
+      parameters:
+        - $ref: "#/components/parameters/number"
+      responses:
+        "200":
+          description: Статус queued, running, done, failed, no_categories, absent или unavailable
+    post:
+      tags: [applications]
+      summary: Повторить поиск товаров
+      parameters:
+        - $ref: "#/components/parameters/number"
+      responses:
+        "200":
+          description: Поиск поставлен в очередь
+
+  /bki-consent:
+    get:
+      tags: [applications]
+      summary: Согласие на БКИ
+      description: |
+        Это WebSocket, не обычный GET. Сообщение клиента — JSON {"checked": true}
+        или {"checked": false}. HTTP-запрос без Upgrade получает 400.
+
+components:
+  parameters:
+    inn:
+      name: inn
+      in: path
+      required: true
+      schema: { type: string, pattern: "^([0-9]{10}|[0-9]{12})$" }
+    registrationId:
+      name: registrationId
+      in: path
+      required: true
+      schema: { type: string, description: ОГРН из 13 цифр или ОГРНИП из 15 }
+    number:
+      name: number
+      in: path
+      required: true
+      schema: { type: integer, format: int64 }
+
+  responses:
+    error:
+      description: Ошибка
+      content:
+        application/json:
+          schema:
+            type: object
+            properties:
+              error: { type: string }
+
+  schemas:
+    ApplicationCreate:
+      type: object
+      required: [purpose, amount, termMonths, inn, registrationId]
+      properties:
+        purpose: { type: string, maxLength: 1000 }
+        amount: { type: number, minimum: 0.01, description: Рубли, не больше 2 знаков после запятой }
+        termMonths: { type: integer, minimum: 1 }
+        inn: { type: string }
+        registrationId: { type: string }
+        annualRevenue: { type: number, minimum: 0 }
+        obligations: { type: number, minimum: 0 }
+        employees: { type: integer, minimum: 0 }
+        documents:
+          type: array
+          items:
+            type: object
+            required: [name, kind]
+            properties:
+              name: { type: string }
+              kind: { type: string }
+    ApplicationListItem:
+      type: object
+      properties:
+        number: { type: integer, format: int64 }
+        businessName: { type: string, nullable: true }
+        amount: { type: number }
+        termMonths: { type: integer }
+        step: { type: string, enum: [submitted, registryCheck, scoring, decision] }
+        stepTitle: { type: string }
+        employeeDecision: { type: string, nullable: true, enum: [approve, review, reject] }
+        openRequestCount: { type: integer }
+        counterAmount: { type: number, nullable: true }
+    Statement:
+      type: object
+      required: [consent]
+      properties:
+        consent: { type: boolean }
+        turnover:
+          type: array
+          minItems: 6
+          maxItems: 12
+          description: Обязателен при consent true
+          items:
+            type: object
+            required: [month, incoming, outgoing]
+            properties:
+              month: { type: string, example: "2026-04", description: yyyy-MM }
+              incoming: { type: number, minimum: 0 }
+              outgoing: { type: number, minimum: 0 }
