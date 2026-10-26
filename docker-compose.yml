@@ -1,27 +1,41 @@
-# Backend API and the shared Postgres server.
-# Database ml is created by POSTGRES_DB. src/postgres/initdb applies src/ml/sql to it.
-# Database registries is created by src/registries/init-registries.sh.
-# ML service (product search) uses Ollama and SearXNG. The first start downloads the Qwen model (~3 GB).
-# Frontend stays a local Vite dev server: cd src/frontend && npm install && npm run dev
+# Whole prototype in one command: docker compose up --build
+# Open http://localhost:3000 when frontend is up.
+# The first start downloads base images, npm, NuGet and pip packages, and the Qwen model (~3.5 GB).
+# Database ml is created by POSTGRES_DB. src/postgres/initdb applies src/ml/sql to it and loads the registry mocks
+# into database registries. Init scripts run only on an empty postgres-data volume.
 
 name: smart-credit-portal
 
 services:
+  frontend:
+    build:
+      context: ./src/frontend
+    restart: unless-stopped
+    ports:
+      - "${FRONTEND_PORT:-3000}:80"
+    depends_on:
+      backend:
+        condition: service_started
+
   backend:
     build:
       context: ./src/backend
+    restart: unless-stopped
     ports:
-      - "8080:8080"
+      - "${BACKEND_PORT:-8080}:8080"
     environment:
       ASPNETCORE_ENVIRONMENT: Development
       ASPNETCORE_URLS: http://+:8080
+      Postgres__ConnectionString: Host=postgres;Port=5432;Username=${ML_POSTGRES_USER:-ml};Password=${ML_POSTGRES_PASSWORD:-change-me};Database=registries
       # PurposeHandoff posts here. Outside Compose appsettings.json points at http://localhost:8000.
       Ml__BaseUrl: http://ml:8000
+    depends_on:
+      postgres:
+        condition: service_healthy
 
   postgres:
     image: postgres:16-alpine
-    ports:
-      - "5432:5432"
+    restart: unless-stopped
     environment:
       POSTGRES_USER: ${ML_POSTGRES_USER:-ml}
       POSTGRES_PASSWORD: ${ML_POSTGRES_PASSWORD:-change-me}
@@ -35,7 +49,8 @@ services:
       test: ["CMD-SHELL", "pg_isready -U $$POSTGRES_USER -d $$POSTGRES_DB"]
       interval: 5s
       timeout: 5s
-      retries: 10
+      retries: 30
+      start_period: 30s
 
   # Product search: Qwen 3.5 in Ollama reads the pages, SearXNG finds them.
   ml:
@@ -43,7 +58,7 @@ services:
       context: ./src/ml
     restart: unless-stopped
     ports:
-      - "8000:8000"
+      - "${ML_PORT:-8000}:8000"
     healthcheck:
       test: ["CMD", "python", "-c", "import urllib.request; urllib.request.urlopen('http://127.0.0.1:8000/health', timeout=3)"]
       interval: 10s
@@ -70,15 +85,13 @@ services:
 
   searxng:
     image: searxng/searxng:2026.10.17-2a6fc07be
-    ports:
-      - "8888:8080"
+    restart: unless-stopped
     volumes:
       - ./src/ml/searxng/settings.yml:/etc/searxng/settings.yml:ro
 
   ollama:
     image: ollama/ollama:0.40.9
-    ports:
-      - "11434:11434"
+    restart: unless-stopped
     volumes:
       - ollama-data:/root/.ollama
     healthcheck:
