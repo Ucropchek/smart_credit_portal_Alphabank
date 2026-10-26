@@ -1,109 +1,219 @@
-# Умный кредитный кабинет предпринимателя
+# Умный кредитный портал
 
-Прототип цифрового кредитного конвейера для малого и микробизнеса (кейс Альфа-Банка). Предприниматель подаёт заявку в личном кабинете. Банк проверяет компанию по реестрам, считает скоринг и выносит решение. Клиент видит статус на каждом этапе и подборку реальных товаров, которые можно купить на сумму кредита.
+Репозиторий `smart_credit_portal_Alphabank`. В кейсе Changellenge >> и АО «Альфа-Банк» от 19.10.2026 продукт называется «Умный кредитный кабинет предпринимателя».
 
-Все внешние источники заменены синтетическими моками: ЕГРЮЛ, ЕГРИП, ФНС «Прозрачный бизнес», реестр МСП, БКИ, Федресурс, картотека арбитражных дел. Единственное обращение во внешний интернет — поиск товаров.
+Кейс задаёт прототип цифрового кредитного конвейера для малого и микробизнеса: один процесс от потребности в финансировании до результата по заявке, общий для клиента и банка. Клиент выбирает задачу и продукт и передаёт сумму, срок, цель и сведения о бизнесе. Банк проверяет полноту, при нехватке данных запрашивает уточнение, обогащает заявку и отдельно считает риск и кредитное решение. Итог шире «да/нет»: запрошенные условия, другие условия, уточнение или отказ. Подписание и выдачу денег кейс разрешает смоделировать без реальных операций.
 
-## Запуск одной командой
+Пользователь кейса — представитель малого или микробизнеса без банковской экспертизы: собственник, генеральный директор, финансовый директор, бухгалтер или другой уполномоченный сотрудник. На 10.07.2026 в Едином реестре МСП 6,6 млн субъектов, на 3,5% больше, чем годом ранее. В июле 2026 банки выдали субъектам МСП 1,313 трлн рублей. К октябрю 2025 совокупные выдачи Альфа-Банка малому бизнесу превысили 1 трлн рублей. Доступа к системам банка нет: внешние проверки — локальные моки, данные синтетические, платных API нет. Сценарий идёт внутри продукта. Клиентская часть — сайт. У используемой языковой модели открытые веса.
 
-```bash
+В копии `main` `328e91c` этот путь уже собран в кабинете: заявка хранится в PostgreSQL, риск считает балльная таблица портала, сотрудник банка фиксирует решение. В коде входа и ролей с паролем нет: роль «предприниматель / кредитный эксперт» переключается в интерфейсе.
+
+## Архитектура и стек
+
+Браузер открывает Vite. Запросы кабинета идут на тот же origin. Прокси разработки пересылает `/companies`, `/businesses`, `/applications` и WebSocket `/bki-consent` на API `http://localhost:8080`.
+
+API — ASP.NET Core, `net10.0`, проект `src/backend/SmartCredit.Api.csproj`. Он читает и пишет PostgreSQL 16. Строка подключения в режиме Development указывает базу `registries`. Схему `portal` API создаёт сам при первом обращении к заявкам. Реестры в эту базу кладёт скрипт инициализации Postgres, не API.
+
+Один сервер Postgres держит две базы. `ml` создаёт образ из `POSTGRES_DB`. `registries` создаёт `src/registries/init-registries.sh`. В `registries` папка — схема с тем же именем. Сейчас это `arbitration`, `bki`, `egrip`, `egrul`, `fedresurs`, `fns`, `goods`, `msp`. Порядок — имена при `LC_ALL=C`. В кейсе среди источников названы бюро кредитных историй: ЕГРЮЛ, ЕГРИП, сервис ФНС «Прозрачный бизнес», МСП, Федресурса, арбитража и каталога `goods`. Все реестры локально сымитированы SQL таблицами.
+
+Скоринг карточки — таблица баллов этого портала, не коэффициенты Альфа-Банка: в ответе `model.alfaCoefficients` равен `false`. Стоп-фактор даёт `reject`. Без стопа балл от 70 даёт `approve`, ниже — `review`. Подробности и источники лежат в `docs/scoring.md`. Решение сотрудника банка пишется отдельно: `approve`, `review` или `reject`. Если запрошенная сумма выше потолка продукта, API сохраняет встречную сумму. Коды продукта в API — `ordinary` и `msp-subsidized`. На витрине кабинета подписи другие: оборотный кредит, кредит на оборудование, кредит на исполнение контракта.
+
+ML-сервис `smart_credit_ml` слушает порт 8000. API на шагах проверки реестров и скоринга шлёт ему цель заявки (`PurposeHandoff`) и ждёт ответ 3 секунды. Сервис отвечает `202` и ищет товары в фоне. Ссылки берёт SearXNG, текст страниц читает Qwen 3.5 в Ollama. Задания поиска лежат в `ml.goods_searches`. Это не схема `goods` в базе `registries`.
+
+Шаги заявки в ограничении базы: `submitted`, `registryCheck`, `scoring`, `decision`. Экраны кабинета: личный кабинет, подача заявки, статус и решение, конвейер банка. Пункты меню «Счета и платежи», «Документы», «Чат с банком», «Портфель клиентов», «Отчёты по рискам», «Политики скоринга» открывают оболочку `Services`.
+
+Ранний текст `docs/code-guide.md` описывает каркас из двух сервисов Compose и экран-счётчик Vite. В `328e91c` состав сервисов и экраны — как в этом файле. Заметка `docs/frontend-endpoints.md` описывает `main` без вызовов API. В этой копии кабинет вызывает API из `src/frontend/src/api`.
+
+```
+smart_credit_portal_Alphabank/
+  README.md                 корневой README пустой
+  .env.example              пользователь, пароль и база Postgres для Compose
+  .gitignore
+  docker-compose.yml        API, Postgres, ML, SearXNG, Ollama
+  src/frontend/             React, TypeScript, Vite, Tailwind; в Compose не входит
+  src/backend/              ASP.NET Core, Dockerfile, appsettings
+  src/ml/                   пакет smart_credit_ml, lock-файлы, SQL базы ml
+  src/postgres/initdb/      init.sh: SQL базы ml, затем реестры
+  src/registries/           SQL моков реестров и init-registries.sh
+  src/docs/README.md        указатель папок репозитория
+```
+
+## Что должно быть установлено
+
+Для сценария Compose: Docker с Compose. Версия Docker в репозитории не зафиксирована.
+
+Образы, которые поднимает Compose:
+
+| Образ | Где задан |
+| --- | --- |
+| `mcr.microsoft.com/dotnet/sdk:10.0` и `aspnet:10.0` | `src/backend/Dockerfile` |
+| `postgres:16-alpine` | `docker-compose.yml` |
+| `python:3.12-slim` | `src/ml/Dockerfile` |
+| `searxng/searxng:2026.10.17-2a6fc07be` | `docker-compose.yml` |
+| `ollama/ollama:0.40.9` | `docker-compose.yml` |
+
+Для запуска страницы на этой машине: Node.js и npm. В `package.json` версия Node не задана. Сборки oxlint в `package-lock.json` требуют Node `^20.19.0` или `>=22.12.0`.
+
+Для `dotnet run`: SDK .NET 10 (`TargetFramework` `net10.0`).
+
+Для локального ML без его контейнера: Python. Образ сервиса — 3.12. `pyproject.toml` допускает `>=3.11`. Lock-файлы собраны под 3.12.
+
+Отдельных Make, линтера .NET и тестов API в репозитории нет.
+
+## Переменные окружения
+
+Compose сам читает `.env` в корне репозитория. Пример — корневой `.env.example`. Если файла нет, в `docker-compose.yml` остаются те же значения: пользователь `ml`, пароль `change-me`, база `ml`.
+
+```powershell
+Copy-Item .env.example .env
+```
+
+`src/ml/.env.example` — справочник пакета. Compose этот путь не читает. `main.py` и сервис читают только окружение процесса, файла `.env` рядом с пакетом не подхватывают. Для локального Python переменные нужно выставить в сессии.
+
+Пароль `change-me` — локальная заглушка.
+
+| Переменная | Описание | По умолчанию или пример | Обязательность |
+| --- | --- | --- | --- |
+| `ML_POSTGRES_USER` | Пользователь Postgres. Compose передаёт его в `POSTGRES_USER` | `ml` | нет |
+| `ML_POSTGRES_PASSWORD` | Пароль Postgres | `change-me` | нет |
+| `ML_POSTGRES_DB` | База, которую создаёт образ Postgres. Это база `ml`, не `registries` | `ml` | нет |
+| `ML_POSTGRES_HOST` | Хост базы для Python. В Compose у сервиса `ml` стоит `postgres` | `localhost` | нет |
+| `ML_POSTGRES_PORT` | Порт Postgres | `5432` | нет |
+| `ML_SQL_DIR` | Каталог `*.sql` для команды `smart-credit-ml`. Относительный путь считается от `src/ml` | каталог `sql` рядом с пакетом | нет |
+| `ML_SEARXNG_URL` | SearXNG. В Compose: `http://searxng:8080` | `http://localhost:8888` | нет |
+| `ML_OLLAMA_URL` | Ollama. В Compose: `http://ollama:11434` | `http://localhost:11434` | нет |
+| `ML_LLM_MODEL` | Имя модели Ollama. Её скачивает сервис `ollama-pull` | `qwen3.5:4b` | нет |
+| `ML_LLM_TIMEOUT` | Таймаут вызова модели, секунды | `180` | нет |
+| `ML_SEARCH_MAX_QUERIES` | Сколько поисковых запросов оставить | `3` | нет |
+| `ML_SEARCH_RESULTS_PER_QUERY` | Результатов SearXNG на запрос | `8` | нет |
+| `ML_SEARCH_MAX_CANDIDATES` | Потолок кандидатов | `16` | нет |
+| `ML_FETCH_TIMEOUT` | Таймаут загрузки страницы, секунды | `8` | нет |
+| `ML_FETCH_CONCURRENCY` | Параллельные загрузки страниц | `5` | нет |
+| `ML_GOODS_STORE` | Где хранить задания поиска. Любое значение, кроме `memory`, включает Postgres | `postgres` | нет |
+| `ML_HANDOFF_MAX_CATEGORIES` | Сколько категорий цели искать по одной заявке | `3` | нет |
+| `ASPNETCORE_ENVIRONMENT` | В Compose и в профиле `http` — `Development`. Тогда читается `appsettings.Development.json` | `Development` | да, чтобы подхватить строку Postgres из этого файла |
+| `ASPNETCORE_URLS` | Адрес Kestrel в контейнере | `http://+:8080` | задана в Dockerfile и Compose |
+| `Ml__BaseUrl` | Куда API шлёт передачу заявки. В `appsettings.json` ключ `Ml:BaseUrl` | Compose: `http://ml:8000`. Файл: `http://localhost:8000` | нет |
+| `Postgres__ConnectionString` | Перекрывает `Postgres:ConnectionString` | в файле Development: `Host=localhost;Port=5432;Username=ml;Password=change-me;Database=registries` | да для запуска API. В Compose переменная не задана |
+| `OLLAMA_HOST` | Только у сервиса `ollama-pull` | `http://ollama:11434` | задана в Compose |
+
+Без `Postgres:ConnectionString` процесс API останавливается с текстом `Нет строки подключения Postgres:ConnectionString`.
+
+## Локальный запуск с нуля
+
+Команды из корня `smart_credit_portal_Alphabank`, если не указана другая папка. SQL реестров и базы `ml` выполняет контейнер Postgres при первом создании тома `postgres-data`. Повторный запуск готового тома эти файлы заново не применяет. Отдельной команды миграций нет. Схему `portal` создаёт API при работе с заявками.
+
+Учётных записей приложения нет.
+
+### Docker Compose
+
+Compose поднимает `backend`, `postgres`, `ml`, `searxng`, `ollama` и одноразовый `ollama-pull`. Фронтенд в файл не входит. Первый старт скачивает модель `qwen3.5:4b`, около 3 ГБ, в том `ollama-data`. Пока загрузка не завершилась, сервис `ml` не стартует: он ждёт успешного `ollama-pull`.
+
+```powershell
+Copy-Item .env.example .env
 docker compose up --build
 ```
 
-Откройте http://localhost:3000.
+Страница отдельно:
 
-При первом запуске всё нужное скачивается автоматически: базовые образы, пакеты npm, NuGet и pip, модель Qwen 3.5 (около 3,3 ГБ). На проверочной машине первый запуск занял 11 минут (сборка образов около 6 минут, модель около 5 минут при 10 МБ/с). Следующие запуски поднимаются за секунды: образы и модель остаются в Docker.
-
-Сервис `ml` стартует последним, после загрузки модели. Сайт и заявки работают раньше, подборка товаров появится, когда поднимется `ml`.
-
-Остановить: `Ctrl+C` или `docker compose down`. Сбросить базу и начать с чистыми данными: `docker compose down -v` (модель тоже удалится и скачается заново).
-
-## Требования
-
-- Docker Desktop (Windows, macOS) или Docker Engine с плагинами Compose v2 и Buildx (Linux, WSL).
-- 8 ГБ оперативной памяти, около 15 ГБ свободного места на диске.
-- Интернет при первом запуске и для поиска товаров.
-- Свободные порты 3000, 8080 и 8000 (меняются в `.env`, см. ниже).
-
-Видеокарта не нужна: модель в Docker работает на процессоре.
-
-## Адреса
-
-| Адрес | Что это |
-|---|---|
-| http://localhost:3000 | веб-интерфейс: кабинет предпринимателя и рабочее место кредитного эксперта |
-| http://localhost:8080 | API бэкенда (ASP.NET Core) |
-| http://localhost:8000/docs | Swagger ML-сервиса поиска товаров |
-
-Postgres, SearXNG и Ollama доступны только внутри сети Docker и наружу не публикуются, чтобы не конфликтовать с сервисами, уже запущенными на машине.
-
-## Архитектура
-
-```
-браузер ──► frontend (nginx, :3000) ──/applications, /companies, /businesses, /bki-consent──► backend (:8080)
-                                                                                                  │
-                         ┌────────────────────────────────────────────────────────────────────────┤
-                         ▼                                                                        ▼
-            postgres: база registries (моки реестров, заявки)                     ml (:8000): поиск товаров
-                      база ml (задания поиска товаров)                ◄──────────────┤
-                                                                       ollama (Qwen 3.5)   searxng (метапоиск)
+```powershell
+cd src/frontend
+npm install
+npm run dev
 ```
 
-| Сервис | Технологии | Назначение |
-|---|---|---|
-| `frontend` | React 19, TypeScript, Vite, Tailwind, nginx | интерфейс; nginx отдаёт статику и проксирует API и WebSocket на бэкенд |
-| `backend` | .NET 10, ASP.NET Core, Npgsql | заявки, проверки по реестрам, скоринг, решение, передача цели кредита в ML |
-| `postgres` | PostgreSQL 16 | моки реестров и заявки (база `registries`), задания поиска товаров (база `ml`) |
-| `ml` | Python 3.12, FastAPI | поиск товаров под сумму кредита, подробности в [`src/ml/README.md`](src/ml/README.md) |
-| `ollama` | Ollama, Qwen 3.5 4B | локальная языковая модель с открытыми весами |
-| `ollama-pull` | Ollama | один раз скачивает модель и завершается |
-| `searxng` | SearXNG | метапоисковик для поиска товаров |
+После запуска:
 
-Базы создаются скриптами из `src/postgres/initdb`, `src/ml/sql` и `src/registries` при первом запуске, на пустом томе `postgres-data`.
+| Что | Адрес |
+| --- | --- |
+| Кабинет, сервер Vite | http://127.0.0.1:5173/ |
+| API | http://localhost:8080/ и http://localhost:8080/health |
+| ML, Swagger и проверка | http://localhost:8000/docs и http://localhost:8000/health |
+| SearXNG | http://localhost:8888 |
+| Ollama | http://localhost:11434 |
+| Postgres | `localhost:5432` |
 
-## Проверка по шагам
+`vite.config.ts` порт не задаёт. 5173 — порт сервера разработки Vite по умолчанию. Его же фиксирует `docs/code-guide.md`.
 
-1. Откройте http://localhost:3000. В шапке выбран режим «Предприниматель».
-2. «Новая заявка». Компания ООО «Демо-альфа» (ИНН `7701990013`, заложена в моках реестров) уже подставлена; карточка собрана из ЕГРЮЛ, ФНС, МСП, БКИ, Федресурса и арбитража. Другой ИНН из моков можно ввести и нажать «Найти».
-3. Напишите цель кредита, например «Покупка настольного компьютера для бухгалтерии»: под полем появятся распознанные категории товаров. Выберите сумму и срок, проверьте финансы (выручка и численность подставлены из ФНС).
-4. В блоке «Документы» нажмите «Подставить примеры названий», отметьте согласие на запрос в БКИ и нажмите «Отправить в банк».
-5. В «Мои заявки» откройте заявку: видны этапы конвейера, финансы и блок «Товары под сумму кредита». Подборка появляется через несколько минут: поиск идёт в фоне, модель в Docker работает на процессоре.
-6. Переключите режим на «Кредитный эксперт (Банк)»: заявка в конвейере, проверка по реестрам, скоринг с расшифровкой баллов, решение.
-7. После решения клиент видит итог в своей заявке.
+`<TODO: в docker-compose.yml нет Postgres__ConnectionString>`. В контейнере `backend` строка из `appsettings.Development.json` указывает `Host=localhost`. Этот localhost — сам контейнер API, не сервис `postgres`. Для API внутри Compose нужна строка с `Host=postgres` и базой `registries`. Локальный `dotnet run` на машине, где опубликован порт 5432, с файлом Development совпадает.
 
-Те же шаги через API (запросы идут через nginx фронтенда):
+### Запуск для разработки
 
-```bash
-curl http://localhost:3000/companies/7701990013
+Postgres можно поднять одним сервисом. API и страница работают на машине.
+
+```powershell
+Copy-Item .env.example .env
+docker compose up -d postgres
 ```
 
-```bash
-curl -X POST http://localhost:3000/applications -H "Content-Type: application/json" -d "{\"purpose\":\"Покупка настольного компьютера\",\"amount\":80000,\"termMonths\":12,\"inn\":\"7701990013\",\"registrationId\":\"1247700099008\"}"
+Второй терминал:
+
+```powershell
+cd src/backend
+dotnet run --launch-profile http
 ```
 
-Затем `POST /applications/{номер}/registry-check`, `POST /applications/{номер}/score`, `POST /applications/{номер}/decision` с телом `{"decision":"approve"}` и `GET /applications/{номер}/goods`.
+Профиль `http` в `Properties/launchSettings.json` слушает http://localhost:8080 и выставляет `ASPNETCORE_ENVIRONMENT=Development`. Браузер сам не открывается. Профиль IIS Express в репозитории есть и для этого запуска не используется.
 
-## Настройки
+Третий терминал — страница, команды те же: `cd src/frontend`, `npm install`, `npm run dev`.
 
-Все переменные имеют значения по умолчанию, поэтому файл `.env` не обязателен. Чтобы поменять значения, скопируйте [`.env.example`](.env.example) в `.env` рядом с `docker-compose.yml`.
+ML вместе с Ollama и SearXNG, из корня:
 
-| Переменная | По умолчанию | |
-|---|---|---|
-| `FRONTEND_PORT` | `3000` | порт веб-интерфейса |
-| `BACKEND_PORT` | `8080` | порт API бэкенда |
-| `ML_PORT` | `8000` | порт ML-сервиса |
-| `ML_LLM_MODEL` | `qwen3.5:4b` | модель Ollama; `qwen3.5:9b` точнее, но требует около 7 ГБ |
-| `ML_POSTGRES_USER`, `ML_POSTGRES_PASSWORD`, `ML_POSTGRES_DB` | `ml`, `change-me`, `ml` | учётные данные Postgres (только для локального прототипа) |
+```powershell
+docker compose up --build ml
+```
 
-## Если что-то не так
+Локальный процесс ML, когда Ollama и SearXNG уже запущены. Зависимости ставятся двумя командами: пакет с хешами и редактируемая установка в одном вызове pip не смешиваются.
 
-- **Порт занят.** Поменяйте `FRONTEND_PORT`, `BACKEND_PORT` или `ML_PORT` в `.env`.
-- **Не загрузились данные реестров после изменения SQL.** Скрипты инициализации выполняются только на пустом томе: `docker compose down -v`, затем снова `docker compose up --build`.
-- **Подборка товаров долго «загружается».** Посмотрите `docker compose logs -f ml`. На процессоре поиск по одной категории занимает 2–5 минут.
-- **Подборка пустая.** Поиск товаров идёт через живой интернет; поисковики за SearXNG иногда ограничивают частые запросы.
+```powershell
+cd src/ml
+python -m venv .venv
+.venv\Scripts\python -m pip install --require-hashes -r requirements-test.lock
+.venv\Scripts\python -m pip install --no-deps -e .
+.venv\Scripts\uvicorn smart_credit_ml.api:app --port 8000
+```
 
-## Разработка без Docker
+Адреса те же, что в таблице выше. В этом сценарии API ходит в ML по `http://localhost:8000` из `appsettings.json`.
 
-- Фронтенд: `cd src/frontend && npm install && npm run dev`. Vite проксирует API на `http://localhost:8080`.
-- Бэкенд: `cd src/backend && dotnet run` (нужен Postgres на `localhost:5432`, строка подключения в `appsettings.Development.json`).
-- ML: см. [`src/ml/README.md`](src/ml/README.md).
+Сборка страницы и просмотр сборки, если нужны:
+
+```powershell
+cd src/frontend
+npm run build
+npm run preview
+```
+
+Отдельного production-образа фронтенда в репозитории нет.
+
+## Команды, которые в проекте есть
+
+Линтер страницы, из `src/frontend`:
+
+```powershell
+npm run lint
+```
+
+Это `oxlint`.
+
+Тесты ML, из `src/ml`, после установки `requirements-test.lock`. Они подменяют поисковик, загрузку страниц и модель. Интернет и Ollama для них не нужны. `src/ml/README.md` указывает 30 тестов.
+
+```powershell
+.venv\Scripts\python -m pytest
+```
+
+Пересборка lock-файлов Python после правки `pyproject.toml`. Для обычного запуска `uv` не нужен. Команды записаны в `src/ml/README.md`.
+
+```powershell
+uv pip compile pyproject.toml --universal --python-version 3.12 --generate-hashes --no-header -o requirements.lock
+uv pip compile pyproject.toml --extra test --universal --python-version 3.12 --generate-hashes --no-header -o requirements-test.lock
+```
+
+Команда `smart-credit-ml` печатает настройки Postgres и список `*.sql`. Соединение она не открывает. `smart-credit-products` запускает один поиск товаров из командной строки. Тестов .NET и отдельной команды генерации клиента API нет.
+
+## Частые проблемы запуска
+
+**Docker не запущен.** `docker compose` не подключается к движку. Запустите Docker Desktop и повторите команду.
+
+**Порт занят.** Compose публикует 5432, 8080, 8000, 8888 и 11434. Если порт уже держит локальный Postgres, старый контейнер или другой API, привязка не создаётся. Освободите порт или остановите прежний контейнер того же проекта: `docker compose down`.
+
+**База ещё не готова или API смотрит не туда.** У `postgres` есть проверка `pg_isready`. Сервис `ml` ждёт её. Сервис `backend` не ждёт и в Compose не получает хост `postgres`. Пока инициализация тома не закончилась, запросы к реестрам падают. Подождите готовности Postgres. Для контейнера API задайте `Postgres__ConnectionString` с `Host=postgres;Port=5432;Username=ml;Password=change-me;Database=registries`. Если том `postgres-data` уже был создан со старым SQL, новый скрипт реестров сам не применится: нужна пустая инициализация тома.
