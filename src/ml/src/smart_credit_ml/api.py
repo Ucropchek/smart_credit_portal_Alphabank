@@ -45,13 +45,19 @@ class Match(BaseModel):
 
 
 class Category(BaseModel):
+    purpose: str | None = Field(default=None, max_length=1000)
     matches: list[Match] = Field(default_factory=list, max_length=50)
 
 
 class HandoffRequest(BaseModel):
     applicationId: int = Field(gt=0)
     amount: Decimal = Field(gt=0, max_digits=15, decimal_places=2)
+    purpose: str | None = Field(default=None, max_length=1000)
     category: Category = Field(default_factory=Category)
+
+    def loan_purpose(self) -> str | None:
+        text = (self.purpose or self.category.purpose or "").strip()
+        return text or None
 
 
 class ProductSearchRequest(BaseModel):
@@ -65,6 +71,7 @@ def job_json(job: GoodsJob) -> dict:
     return {
         "applicationId": job.application_id,
         "amount": float(job.amount),
+        "purpose": job.purpose,
         "status": job.status,
         "categories": job.categories,
         "results": job.results,
@@ -98,7 +105,7 @@ def create_app(services: Callable[[], AbstractAsyncContextManager[Services]] = d
     async def handoff(request: HandoffRequest) -> JSONResponse:
         ready = state["services"]
         categories = [match.model_dump() for match in request.category.matches]
-        job, queue = await ready.store.accept(request.applicationId, request.amount, categories)
+        job, queue = await ready.store.accept(request.applicationId, request.amount, categories, request.loan_purpose())
         if queue:
             ready.worker.enqueue(job.application_id)
         return JSONResponse(

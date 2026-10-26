@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import asyncio
 import json
 from dataclasses import dataclass, field, replace
 from datetime import datetime, timezone
@@ -21,14 +22,16 @@ class GoodsJob:
     status: Status
     results: list[dict[str, Any]] = field(default_factory=list)
     error: str | None = None
+    purpose: str | None = None
     updated_at: datetime = field(default_factory=lambda: datetime.now(timezone.utc))
 
 
 class GoodsStore(Protocol):
     async def ensure(self) -> None: ...
 
-    async def accept(self, application_id: int, amount: Decimal, categories: list[dict[str, Any]]) -> tuple[GoodsJob, bool]:
-        ...
+    async def accept(
+        self, application_id: int, amount: Decimal, categories: list[dict[str, Any]], purpose: str | None = None
+    ) -> tuple[GoodsJob, bool]: ...
 
     async def save(self, job: GoodsJob) -> None: ...
 
@@ -52,11 +55,11 @@ class MemoryGoodsStore:
     async def ensure(self) -> None:
         return None
 
-    async def accept(self, application_id, amount, categories):
+    async def accept(self, application_id, amount, categories, purpose=None):
         existing = self.jobs.get(application_id)
         if existing is not None and not _must_restart(existing):
             return existing, False
-        job = GoodsJob(application_id, amount, categories, _initial_status(categories))
+        job = GoodsJob(application_id, amount, categories, _initial_status(categories), purpose=purpose)
         self.jobs[application_id] = job
         return job, job.status == "queued"
 
@@ -77,6 +80,7 @@ create table if not exists ml.goods_searches (
     application_id bigint primary key,
     amount numeric(15, 2) not null,
     categories jsonb not null,
+    purpose text,
     status text not null,
     results jsonb not null default '[]'::jsonb,
     error text,
@@ -85,6 +89,8 @@ create table if not exists ml.goods_searches (
     constraint ck_goods_searches_amount check (amount > 0),
     constraint ck_goods_searches_status check (status in ('queued', 'running', 'done', 'failed', 'no_categories'))
 );
+
+alter table ml.goods_searches add column if not exists purpose text;
 """
 
 
@@ -92,70 +98,78 @@ class PostgresGoodsStore:
     def __init__(self, conninfo: dict[str, str]) -> None:
         self.conninfo = conninfo
 
-    async def _connect(self) -> psycopg.AsyncConnection:
-        return await psycopg.AsyncConnection.connect(**self.conninfo, autocommit=True, row_factory=dict_row)
+    def _run(self, sql: str, params: Any = None, fetch: Literal["one", "all"] | None = None) -> Any:
+        with psycopg.connect(**self.conninfo, autocommit=True, row_factory=dict_row) as connection:
+            cursor = connection.execute(sql, params)
+            if fetch == "one":
+                return cursor.fetchone()
+            if fetch == "all":
+                return cursor.fetchall()
+            return None
+
+    async def _query(self, sql: str, params: Any = None, fetch: Literal["one", "all"] | None = None) -> Any:
+        return await asyncio.to_thread(self._run, sql, params, fetch)
 
     async def ensure(self) -> None:
-        async with await self._connect() as connection:
-            await connection.execute(_DDL)
+        await self._query(_DDL)
 
-    async def accept(self, application_id, amount, categories):
+    async def accept(self, application_id, amount, categories, purpose=None):
         status = _initial_status(categories)
-        async with await self._connect() as connection:
-            row = await (
-                await connection.execute(
-                    """
-                    insert into ml.goods_searches (application_id, amount, categories, status)
-                    values (%(id)s, %(amount)s, %(categories)s, %(status)s)
-                    on conflict (application_id) do update
-                        set amount = excluded.amount,
-                            categories = excluded.categories,
-                            status = excluded.status,
-                            results = '[]'::jsonb,
-                            error = null,
-                            updated_at = now()
-                        where ml.goods_searches.status = 'failed'
-                    returning *
-                    """,
-                    {"id": application_id, "amount": amount, "categories": json.dumps(categories, ensure_ascii=False), "status": status},
-                )
-            ).fetchone()
-            if row is None:
-                existing = await self.get(application_id)
-                assert existing is not None
-                return existing, False
-            return _job(row), row["status"] == "queued"
+        row = await self._query(
+            """
+            insert into ml.goods_searches (application_id, amount, categories, purpose, status)
+            values (%(id)s, %(amount)s, %(categories)s, %(purpose)s, %(status)s)
+            on conflict (application_id) do update
+                set amount = excluded.amount,
+                    categories = excluded.categories,
+                    purpose = excluded.purpose,
+                    status = excluded.status,
+                    results = '[]'::jsonb,
+                    error = null,
+                    updated_at = now()
+                where ml.goods_searches.status = 'failed'
+            returning *
+            """,
+            {
+                "id": application_id,
+                "amount": amount,
+                "categories": json.dumps(categories, ensure_ascii=False),
+                "purpose": purpose,
+                "status": status,
+            },
+            fetch="one",
+        )
+        if row is None:
+            existing = await self.get(application_id)
+            assert existing is not None
+            return existing, False
+        return _job(row), row["status"] == "queued"
 
     async def save(self, job):
-        async with await self._connect() as connection:
-            await connection.execute(
-                """
-                update ml.goods_searches
-                set status = %(status)s, results = %(results)s, error = %(error)s, updated_at = now()
-                where application_id = %(id)s
-                """,
-                {
-                    "id": job.application_id,
-                    "status": job.status,
-                    "results": json.dumps(job.results, ensure_ascii=False),
-                    "error": job.error,
-                },
-            )
+        await self._query(
+            """
+            update ml.goods_searches
+            set status = %(status)s, results = %(results)s, error = %(error)s, updated_at = now()
+            where application_id = %(id)s
+            """,
+            {
+                "id": job.application_id,
+                "status": job.status,
+                "results": json.dumps(job.results, ensure_ascii=False),
+                "error": job.error,
+            },
+        )
 
     async def get(self, application_id):
-        async with await self._connect() as connection:
-            row = await (
-                await connection.execute("select * from ml.goods_searches where application_id = %s", (application_id,))
-            ).fetchone()
+        row = await self._query(
+            "select * from ml.goods_searches where application_id = %s", (application_id,), fetch="one"
+        )
         return _job(row) if row else None
 
     async def unfinished(self):
-        async with await self._connect() as connection:
-            rows = await (
-                await connection.execute(
-                    "select * from ml.goods_searches where status = any(%s) order by created_at", (list(UNFINISHED),)
-                )
-            ).fetchall()
+        rows = await self._query(
+            "select * from ml.goods_searches where status = any(%s) order by created_at", (list(UNFINISHED),), fetch="all"
+        )
         return [_job(row) for row in rows]
 
 
@@ -167,5 +181,6 @@ def _job(row: dict[str, Any]) -> GoodsJob:
         status=row["status"],
         results=row["results"],
         error=row["error"],
+        purpose=row.get("purpose"),
         updated_at=row["updated_at"],
     )

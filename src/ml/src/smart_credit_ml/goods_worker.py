@@ -65,7 +65,7 @@ class GoodsWorker:
             entry = {"code": match.get("code"), "title": match.get("title"), "keywords": match.get("keywords", [])}
             query = str(match.get("title") or " ".join(entry["keywords"]) or "").strip()
             try:
-                result = await self.searcher.run(query, job.amount, None, self.max_results)
+                result = await self.searcher.run(query, job.amount, job.purpose, self.max_results)
                 entry["search"] = result_json(result)
                 if result.search_unavailable:
                     entry["error"] = "Поисковик недоступен: ни один запрос не выполнился."
